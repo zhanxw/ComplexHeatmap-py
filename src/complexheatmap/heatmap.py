@@ -793,7 +793,7 @@ class Heatmap(AdditiveUnit):
             w_u = unit(1.0, "npc")
             hw_u = as_unit(heatmap_width, "mm")
         else:
-            w_u = unit(1.0, "npc")
+            w_u = unit(0.0, "mm") if nc == 0 else unit(1.0, "npc")
             hw_u = unit(1.0, "npc")
 
         if height is not None:
@@ -803,7 +803,7 @@ class Heatmap(AdditiveUnit):
             h_u = unit(1.0, "npc")
             hh_u = as_unit(heatmap_height, "mm")
         else:
-            h_u = unit(1.0, "npc")
+            h_u = unit(0.0, "mm") if nr == 0 else unit(1.0, "npc")
             hh_u = unit(1.0, "npc")
 
         # Validate body dims for clusterability

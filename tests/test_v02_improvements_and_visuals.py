@@ -412,3 +412,48 @@ def test_raster_zorder_meth_dataset_oncoprint_subset_and_heatmap3d():
     res_h3 = draw(h3, width=6.0, height=4.5, dpi=80)
     assert len(res_h3._device.ax.collections) > 0
     plt.close("all")
+
+
+def test_fixed_width_heatmap_list_no_blank_gap_before_legend():
+    rng = np.random.default_rng(7)
+    m1 = pd.DataFrame(rng.standard_normal((12, 6)), index=[f"g{i}" for i in range(12)])
+    m2 = pd.DataFrame(rng.standard_normal((12, 6)), index=[f"g{i}" for i in range(12)])
+    h1 = Heatmap(m1, name="H1", width=unit(25, "mm"), cluster_columns=False, show_row_names=False)
+    h2 = Heatmap(m2, name="H2", width=unit(25, "mm"), cluster_columns=False, show_row_names=False)
+    ra = ch.rowAnnotation(
+        mark=ch.anno_mark(at=[1, 6, 10], labels=["GeneA", "GeneB", "GeneC"], link_width=unit(5, "mm")),
+        show_annotation_name=False,
+    )
+    res = draw(h1 + h2 + ra, width=12.0, height=5.0, dpi=100, merge_legends=True)
+    dev = res._device
+
+    seekViewport("global")
+    vp_glob = ch.current_viewport()
+    # Global viewport must be shrunk to fixed list + legend width and centered on 12in (304.8mm) canvas
+    assert vp_glob.w_mm < 220.0
+    assert vp_glob.x0_mm == pytest.approx(0.5 * (dev.w_mm - vp_glob.w_mm), abs=1.0)
+
+    # Gap between trailing anno_mark viewport right edge and leftmost legend title ("H1") must be tight (< 15 mm)
+    seekViewport("annotation_mark_1")
+    vp_mark = ch.current_viewport()
+    mark_right_mm = vp_mark.x0_mm + vp_mark.w_mm
+    dev.fig.canvas.draw()
+    renderer = dev.fig.canvas.get_renderer()
+    inv_trans = dev.ax.transData.inverted()
+    leg_left_candidates = []
+    for txt in dev.ax.texts:
+        if txt.get_text() in ("H1", "H2"):
+            bb = txt.get_window_extent(renderer=renderer)
+            pts_mm = inv_trans.transform([[bb.x0, bb.y0], [bb.x1, bb.y1]])
+            if float(pts_mm[0, 0]) > mark_right_mm:
+                leg_left_candidates.append(float(pts_mm[0, 0]))
+    assert leg_left_candidates
+    assert min(leg_left_candidates) - mark_right_mm < 15.0
+
+    # Calling draw() with width=None on wide fixed-width heatmaps auto-expands the device
+    w1 = Heatmap(m1, name="W1", width=unit(80, "mm"), cluster_columns=False, show_row_names=False)
+    w2 = Heatmap(m2, name="W2", width=unit(80, "mm"), cluster_columns=False, show_row_names=False)
+    w3 = Heatmap(m1, name="W3", width=unit(80, "mm"), cluster_columns=False, show_row_names=False)
+    res_auto = draw(w1 + w2 + w3)
+    assert res_auto._device.w_mm > 240.0
+    plt.close("all")

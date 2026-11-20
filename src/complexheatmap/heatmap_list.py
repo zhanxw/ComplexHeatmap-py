@@ -43,6 +43,7 @@ from .heatmap import (
 from .legend import Legends, packLegend
 from .units import (
     Unit,
+    _MM_PER_INCH,
     as_unit,
     check_gp,
     convertHeight,
@@ -975,6 +976,8 @@ class HeatmapList(AdditiveUnit):
                     if ann is not None:
                         e_l = max(e_l, float(ann.extended.to_mm("x")[1]))
                 ext_left = max(0.0, e_l - left_used)
+            elif isinstance(first_item, HeatmapAnnotation):
+                ext_left = float(first_item.extended.to_mm("x")[1])
             last_item = self.ht_list[-1]
             if isinstance(last_item, Heatmap):
                 right_used = sum(convertWidth(last_item.layout["layout_size"][f"{c}_width"], "mm", valueOnly=True) for c in ("row_title_right", "row_dend_right", "row_names_right", "row_anno_right"))
@@ -983,6 +986,8 @@ class HeatmapList(AdditiveUnit):
                     if ann is not None:
                         e_r = max(e_r, float(ann.extended.to_mm("x")[3]))
                 ext_right = max(0.0, e_r - right_used)
+            elif isinstance(last_item, HeatmapAnnotation):
+                ext_right = float(last_item.extended.to_mm("x")[3])
             self.layout["heatmap_list_padding"] = [pad_bot, ext_left, pad_top, ext_right]
 
             # Auto-expand interior ht_gap so extended column-annotation labels/axes do not collide with neighbors
@@ -1106,6 +1111,8 @@ class HeatmapList(AdditiveUnit):
                     if ann is not None:
                         e_t = max(e_t, float(ann.extended.to_mm("x")[2]))
                 pad_top = max(0.0, e_t - top_used)
+            elif isinstance(first_item, HeatmapAnnotation):
+                pad_top = float(first_item.extended.to_mm("x")[2])
             last_item = self.ht_list[-1]
             if isinstance(last_item, Heatmap):
                 bot_used = sum(convertHeight(last_item.layout["layout_size"][f"{c}_height"], "mm", valueOnly=True) for c in ("column_title_bottom", "column_dend_bottom", "column_names_bottom", "column_anno_bottom"))
@@ -1114,6 +1121,8 @@ class HeatmapList(AdditiveUnit):
                     if ann is not None:
                         e_b = max(e_b, float(ann.extended.to_mm("x")[0]))
                 pad_bot = max(0.0, e_b - bot_used)
+            elif isinstance(last_item, HeatmapAnnotation):
+                pad_bot = float(last_item.extended.to_mm("x")[0])
             self.layout["heatmap_list_padding"] = [pad_bot, pad_left, pad_top, pad_right]
 
             # Auto-expand interior ht_gap so extended row-annotation labels/axes do not collide with vertical neighbors
@@ -1194,18 +1203,13 @@ class HeatmapList(AdditiveUnit):
                     item_fixed_w.append(w_mm)
                     fixed_total += w_mm
                 else:
-                    if is_abs_unit(item.heatmap_param["width"]):
-                        w_mm = convertWidth(item.heatmap_param["width"], "mm", valueOnly=True)
-                        item_fixed_w.append(w_mm)
-                        fixed_total += w_mm
-                    elif is_abs_unit(item.matrix_param["width"]):
-                        ws = item.component_widths_mm()
+                    ws = item.component_widths_mm()
+                    if ws[4] is not None:
                         w_mm = sum(x or 0.0 for x in ws)
                         item_fixed_w.append(w_mm)
                         fixed_total += w_mm
                     else:
                         # Flexible body: track fixed non-body components + weight for body
-                        ws = item.component_widths_mm()
                         fixed_non_body = sum(x or 0.0 for x in ws)
                         fixed_total += fixed_non_body
                         item_fixed_w.append(None)
@@ -1237,17 +1241,12 @@ class HeatmapList(AdditiveUnit):
                 item_fixed_h.append(h_mm)
                 fixed_total += h_mm
             else:
-                if is_abs_unit(item.heatmap_param["height"]):
-                    h_mm = convertHeight(item.heatmap_param["height"], "mm", valueOnly=True)
-                    item_fixed_h.append(h_mm)
-                    fixed_total += h_mm
-                elif is_abs_unit(item.matrix_param["height"]):
-                    hs = item.component_heights_mm()
+                hs = item.component_heights_mm()
+                if hs[4] is not None:
                     h_mm = sum(x or 0.0 for x in hs)
                     item_fixed_h.append(h_mm)
                     fixed_total += h_mm
                 else:
-                    hs = item.component_heights_mm()
                     fixed_non_body = sum(x or 0.0 for x in hs)
                     fixed_total += fixed_non_body
                     item_fixed_h.append(None)
@@ -1268,6 +1267,68 @@ class HeatmapList(AdditiveUnit):
                 body_h = rem * (wt / tot_wt) if tot_wt > 0 else 0.0
                 out_h.append(fixed_non_body + body_h)
         return out_h
+
+    def _fixed_heatmap_list_width_mm(self) -> float | None:
+        if not self.ht_list:
+            return None
+        hl_pad = self.layout["heatmap_list_padding"]
+        gaps_mm = self.ht_list_param["ht_gap"].to_mm("x")
+        if self.direction == "horizontal":
+            total_w = 0.0
+            for item in self.ht_list:
+                if isinstance(item, HeatmapAnnotation):
+                    total_w += convertWidth(item.width, "mm", valueOnly=True)
+                else:
+                    ws = item.component_widths_mm()
+                    if ws[4] is None:
+                        return None
+                    total_w += sum(x or 0.0 for x in ws)
+            total_gap = sum(float(gaps_mm[i]) for i in range(max(0, len(self.ht_list) - 1)))
+            return (total_w + total_gap + hl_pad[1] + hl_pad[3]) if (total_w + total_gap) > 0.0 else None
+
+        has_hm = False
+        max_w = 0.0
+        for item in self.ht_list:
+            if isinstance(item, Heatmap):
+                has_hm = True
+                ws = item.component_widths_mm()
+                if ws[4] is None:
+                    return None
+                max_w = max(max_w, sum(x or 0.0 for x in ws))
+            elif is_abs_unit(item.width):
+                max_w = max(max_w, convertWidth(item.width, "mm", valueOnly=True))
+        return (max_w + hl_pad[1] + hl_pad[3]) if (has_hm and max_w > 0.0) else None
+
+    def _fixed_heatmap_list_height_mm(self) -> float | None:
+        if not self.ht_list:
+            return None
+        hl_pad = self.layout["heatmap_list_padding"]
+        gaps_mm = self.ht_list_param["ht_gap"].to_mm("x")
+        if self.direction == "vertical":
+            total_h = 0.0
+            for item in self.ht_list:
+                if isinstance(item, HeatmapAnnotation):
+                    total_h += convertHeight(item.height, "mm", valueOnly=True)
+                else:
+                    hs = item.component_heights_mm()
+                    if hs[4] is None:
+                        return None
+                    total_h += sum(x or 0.0 for x in hs)
+            total_gap = sum(float(gaps_mm[i]) for i in range(max(0, len(self.ht_list) - 1)))
+            return (total_h + total_gap + hl_pad[0] + hl_pad[2]) if (total_h + total_gap) > 0.0 else None
+
+        has_hm = False
+        max_h = 0.0
+        for item in self.ht_list:
+            if isinstance(item, Heatmap):
+                has_hm = True
+                hs = item.component_heights_mm()
+                if hs[4] is None:
+                    return None
+                max_h = max(max_h, sum(x or 0.0 for x in hs))
+            elif is_abs_unit(item.height):
+                max_h = max(max_h, convertHeight(item.height, "mm", valueOnly=True))
+        return (max_h + hl_pad[0] + hl_pad[2]) if (has_hm and max_h > 0.0) else None
 
     def _draw_standalone_annotation(self, anno: HeatmapAnnotation, body_start_mm: float, body_len_mm: float) -> None:
         i_main = self.ht_list_param["main_heatmap"]
@@ -1342,42 +1403,55 @@ class HeatmapList(AdditiveUnit):
         prepared = self.make_layout(padding=padding, page_size_mm=(page_w_mm, page_h_mm), **layout_kwargs)
         prepared._device = dev
 
+        pad_mm = _normalize_padding(prepared.ht_list_param["padding"])  # [bottom, left, top, right]
+        ls = prepared.layout["layout_size"]
+        hl_pad = prepared.layout["heatmap_list_padding"]
+
+        col_fixed = [
+            convertWidth(ls[f"{c}_width"], "mm", valueOnly=True) if c != "heatmap_list" else None
+            for c in HEATMAP_LIST_ROW_COMPONENTS
+        ]
+        row_fixed = [
+            convertHeight(ls[f"{r}_height"], "mm", valueOnly=True) if r != "heatmap_list" else None
+            for r in HEATMAP_LIST_COLUMN_COMPONENTS
+        ]
+        outer_fixed_w = sum(v for v in col_fixed if v is not None)
+        outer_fixed_h = sum(v for v in row_fixed if v is not None)
+        fixed_hl_w = prepared._fixed_heatmap_list_width_mm()
+        fixed_hl_h = prepared._fixed_heatmap_list_height_mm()
+
+        if newpage and ax is None and fig is None:
+            need_w_mm = (fixed_hl_w + outer_fixed_w + pad_mm[1] + pad_mm[3]) if (width is None and fixed_hl_w is not None) else 0.0
+            need_h_mm = (fixed_hl_h + outer_fixed_h + pad_mm[0] + pad_mm[2]) if (height is None and fixed_hl_h is not None) else 0.0
+            if need_w_mm > page_w_mm + 1e-6 or need_h_mm > page_h_mm + 1e-6:
+                dev.resize(max(page_w_mm, need_w_mm) / _MM_PER_INCH, max(page_h_mm, need_h_mm) / _MM_PER_INCH)
+                page_w_mm = dev.width_mm
+                page_h_mm = dev.height_mm
+
         # Fill canvas background
         if background and str(background).lower() != "transparent":
             grid_rect(gp=gpar(fill=background, col=None))
 
-        pad_mm = _normalize_padding(prepared.ht_list_param["padding"])  # [bottom, left, top, right]
         global_w_mm = max(10.0, page_w_mm - pad_mm[1] - pad_mm[3])
         global_h_mm = max(10.0, page_h_mm - pad_mm[0] - pad_mm[2])
+        hl_w_mm = fixed_hl_w if fixed_hl_w is not None else max(10.0, global_w_mm - outer_fixed_w)
+        hl_h_mm = fixed_hl_h if fixed_hl_h is not None else max(10.0, global_h_mm - outer_fixed_h)
+        final_cols = [hl_w_mm if v is None else v for v in col_fixed]
+        final_rows = [hl_h_mm if v is None else v for v in row_fixed]
+        total_cols_w = max(10.0, sum(final_cols))
+        total_rows_h = max(10.0, sum(final_rows))
 
         pushViewport(
             Viewport(
                 name="global",
-                x=unit(pad_mm[1], "mm"),
-                y=unit(pad_mm[0], "mm"),
-                width=unit(global_w_mm, "mm"),
-                height=unit(global_h_mm, "mm"),
+                x=unit(pad_mm[1] + 0.5 * (global_w_mm - total_cols_w), "mm"),
+                y=unit(pad_mm[0] + 0.5 * (global_h_mm - total_rows_h), "mm"),
+                width=unit(total_cols_w, "mm"),
+                height=unit(total_rows_h, "mm"),
                 just=("left", "bottom"),
             )
         )
         try:
-            ls = prepared.layout["layout_size"]
-            hl_pad = prepared.layout["heatmap_list_padding"]
-
-            # 7 outer column widths (left -> right) and 7 outer row heights (top -> bottom)
-            col_fixed = [
-                convertWidth(ls[f"{c}_width"], "mm", valueOnly=True) if c != "heatmap_list" else None
-                for c in HEATMAP_LIST_ROW_COMPONENTS
-            ]
-            row_fixed = [
-                convertHeight(ls[f"{r}_height"], "mm", valueOnly=True) if r != "heatmap_list" else None
-                for r in HEATMAP_LIST_COLUMN_COMPONENTS
-            ]
-
-            hl_w_mm = max(10.0, global_w_mm - sum(v for v in col_fixed if v is not None))
-            hl_h_mm = max(10.0, global_h_mm - sum(v for v in row_fixed if v is not None))
-            final_cols = [hl_w_mm if v is None else v for v in col_fixed]
-            final_rows = [hl_h_mm if v is None else v for v in row_fixed]
 
             x_cols = [0.0] * 7
             cx = 0.0
@@ -1473,10 +1547,17 @@ class HeatmapList(AdditiveUnit):
                 try:
                     ct_gp = prepared.column_title_param["gp"]
                     pad_c = _title_padding_unit(ct_gp)
-                    if ct_side == "top":
-                        grid_text(prepared.column_title[0], x=unit(0.5, "npc"), y=pad_c[0], just="bottom", gp=ct_gp)
+                    ct_w_mm = convertWidth(max_text_width(prepared.column_title[0], gp=ct_gp), "mm", valueOnly=True)
+                    cx_title = x_cols[3] + 0.5 * final_cols[3]
+                    if ct_w_mm <= total_cols_w:
+                        cx_title = min(max(cx_title, 0.5 * ct_w_mm), total_cols_w - 0.5 * ct_w_mm)
                     else:
-                        grid_text(prepared.column_title[0], x=unit(0.5, "npc"), y=unit(1, "npc") - pad_c[0], just="top", gp=ct_gp)
+                        cx_title = 0.5 * total_cols_w
+                    x_title_u = unit(cx_title - x_cols[3], "mm")
+                    if ct_side == "top":
+                        grid_text(prepared.column_title[0], x=x_title_u, y=pad_c[0], just="bottom", gp=ct_gp)
+                    else:
+                        grid_text(prepared.column_title[0], x=x_title_u, y=unit(1, "npc") - pad_c[0], just="top", gp=ct_gp)
                 finally:
                     popViewport()
 

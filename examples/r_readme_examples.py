@@ -322,7 +322,7 @@ def render_r_readme_02_meth_expr_corr() -> None:
         column_title="Correlations Between DNA Methylation, Gene Expression & Genomic Features",
         column_title_gp=ch.gpar(fontsize=12.5, fontface="bold"),
         save=str(OUT_DIR / "r_readme_02_meth_expr_corr.png"),
-        width=13.5,
+        width=10.2,
         height=8.5,
         dpi=140,
     )
@@ -467,7 +467,7 @@ def render_r_readme_03_scrnaseq_heterogeneity() -> None:
         column_title="Single-Cell RNA-Seq Heterogeneity, Gene Sets & Correlation Structure",
         column_title_gp=ch.gpar(fontsize=12.5, fontface="bold"),
         save=str(OUT_DIR / "r_readme_03_scrnaseq_heterogeneity.png"),
-        width=13.0,
+        width=9.2,
         height=7.8,
         dpi=140,
     )
