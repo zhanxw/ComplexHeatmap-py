@@ -24,6 +24,7 @@ def bar3D(
     default_units: str = "npc",
     fill: Any = "white",
     col: Any = "black",
+    lwd: float = 1.0,
     draw: bool = True,
     **kwargs: Any,
 ) -> GTree:
@@ -39,17 +40,6 @@ def bar3D(
     ul = as_unit(l, default_units)
 
     n = max(len(ux), len(uy), len(uw), len(uh), len(ul))
-    if len(ux) == 1 and n > 1:
-        ux = unit_c(*([ux] * n))
-    if len(uy) == 1 and n > 1:
-        uy = unit_c(*([uy] * n))
-    if len(uw) == 1 and n > 1:
-        uw = unit_c(*([uw] * n))
-    if len(uh) == 1 and n > 1:
-        uh = unit_c(*([uh] * n))
-    if len(ul) == 1 and n > 1:
-        ul = unit_c(*([ul] * n))
-
     if isinstance(fill, (str, int, np.integer, float, np.floating)) or fill is None:
         fill_seq = [fill] * n
     else:
@@ -57,53 +47,94 @@ def bar3D(
         fill_seq = [fl[i % len(fl)] for i in range(n)]
 
     th_rad = math.radians(float(theta))
-    dx = ul * math.cos(th_rad)
-    dy = ul * math.sin(th_rad)
+    cos_t = math.cos(th_rad)
+    sin_t = math.sin(th_rad)
 
-    x1 = ux - uw * 0.5
-    x2 = ux + uw * 0.5
-    y1 = uy - uh * 0.5
-    y2 = uy + uh * 0.5
-
-    xu = ux + dx
-    yu = uy + dy
-    a1 = xu - uw * 0.5
-    a2 = xu + uw * 0.5
-    b1 = yu - uh * 0.5
-    b2 = yu + uh * 0.5
-
-    px_parts: list[Unit] = []
-    py_parts: list[Unit] = []
-    pids: list[int] = []
+    lum_cache: dict[Any, list[str]] = {}
     pfills: list[str] = []
-    pid = 1
     for i in range(n):
-        fill2 = add_luminance(fill_seq[i])
-        # front slope (fill2[1])
-        px_parts.extend([x1[i], a1[i], a2[i], x2[i]])
-        py_parts.extend([y1[i], b1[i], b1[i], y1[i]])
-        pids.extend([pid] * 4)
+        f_key = fill_seq[i]
+        fill2 = lum_cache.get(f_key)
+        if fill2 is None:
+            fill2 = add_luminance(f_key)
+            lum_cache[f_key] = fill2
         pfills.append(fill2[min(1, len(fill2) - 1)])
-        pid += 1
-        # left face (fill2[2])
-        px_parts.extend([x1[i], x1[i], a1[i], a1[i]])
-        py_parts.extend([y1[i], y2[i], b2[i], b1[i]])
-        pids.extend([pid] * 4)
         pfills.append(fill2[min(2, len(fill2) - 1)])
-        pid += 1
-        # top face (fill2[0])
-        px_parts.extend([a1[i], a1[i], a2[i], a2[i]])
-        py_parts.extend([b1[i], b2[i], b2[i], b1[i]])
-        pids.extend([pid] * 4)
         pfills.append(fill2[0])
-        pid += 1
+
+    if n > 0 and all(u._op is None and u._unit == "mm" for u in (ux, uy, uw, uh, ul)):
+        x0 = np.broadcast_to(ux._values, (n,))
+        y0 = np.broadcast_to(uy._values, (n,))
+        w0 = np.broadcast_to(uw._values, (n,))
+        h0 = np.broadcast_to(uh._values, (n,))
+        l0 = np.broadcast_to(ul._values, (n,))
+        dx = l0 * cos_t
+        dy = l0 * sin_t
+        x1 = x0 - 0.5 * w0
+        x2 = x0 + 0.5 * w0
+        y1 = y0 - 0.5 * h0
+        y2 = y0 + 0.5 * h0
+        a1 = x1 + dx
+        a2 = x2 + dx
+        b1 = y1 + dy
+        b2 = y2 + dy
+        px_u = unit(np.column_stack([x1, a1, a2, x2, x1, x1, a1, a1, a1, a1, a2, a2]).ravel(), "mm")
+        py_u = unit(np.column_stack([y1, b1, b1, y1, y1, y2, b2, b1, b1, b2, b2, b1]).ravel(), "mm")
+        pids: Any = np.repeat(np.arange(1, 3 * n + 1), 4)
+    else:
+        if len(ux) == 1 and n > 1:
+            ux = unit_c(*([ux] * n))
+        if len(uy) == 1 and n > 1:
+            uy = unit_c(*([uy] * n))
+        if len(uw) == 1 and n > 1:
+            uw = unit_c(*([uw] * n))
+        if len(uh) == 1 and n > 1:
+            uh = unit_c(*([uh] * n))
+        if len(ul) == 1 and n > 1:
+            ul = unit_c(*([ul] * n))
+
+        dx = ul * cos_t
+        dy = ul * sin_t
+
+        x1 = ux - uw * 0.5
+        x2 = ux + uw * 0.5
+        y1 = uy - uh * 0.5
+        y2 = uy + uh * 0.5
+
+        xu = ux + dx
+        yu = uy + dy
+        a1 = xu - uw * 0.5
+        a2 = xu + uw * 0.5
+        b1 = yu - uh * 0.5
+        b2 = yu + uh * 0.5
+
+        px_parts: list[Unit] = []
+        py_parts: list[Unit] = []
+        pids_list: list[int] = []
+        pid = 1
+        for i in range(n):
+            px_parts.extend([x1[i], a1[i], a2[i], x2[i]])
+            py_parts.extend([y1[i], b1[i], b1[i], y1[i]])
+            pids_list.extend([pid] * 4)
+            pid += 1
+            px_parts.extend([x1[i], x1[i], a1[i], a1[i]])
+            py_parts.extend([y1[i], y2[i], b2[i], b1[i]])
+            pids_list.extend([pid] * 4)
+            pid += 1
+            px_parts.extend([a1[i], a1[i], a2[i], a2[i]])
+            py_parts.extend([b1[i], b2[i], b2[i], b1[i]])
+            pids_list.extend([pid] * 4)
+            pid += 1
+        px_u = unit_c(*px_parts)
+        py_u = unit_c(*py_parts)
+        pids = pids_list
 
     col_val = to_hex_rgba(col) if col is not None else "transparent"
     poly = polygonGrob(
-        x=unit_c(*px_parts),
-        y=unit_c(*py_parts),
+        x=px_u,
+        y=py_u,
         id=pids,
-        gp=gpar(fill=pfills, col=col_val),
+        gp=gpar(fill=pfills, col=col_val, lwd=float(lwd)),
     )
     gt = GTree(children=[poly], cl="bar3D")
     if draw:
@@ -138,6 +169,7 @@ def Heatmap3D(
     from .utils import restore_matrix
 
     user_cell_col = (rect_gp or {}).get("col", "#444444")
+    user_lwd = float((rect_gp or {}).get("lwd", 0.35 if arr.size > 500 else 0.8))
 
     def _layer_fun(j: Any, i: Any, x: Any, y: Any, w: Any, h: Any, fill: Any) -> None:
         vp = current_viewport()
@@ -185,6 +217,7 @@ def Heatmap3D(
                 theta=bar_angle,
                 fill=fills_l,
                 col=user_cell_col,
+                lwd=user_lwd,
                 draw=True,
             )
 

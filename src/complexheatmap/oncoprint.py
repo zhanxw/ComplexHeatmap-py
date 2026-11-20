@@ -188,6 +188,31 @@ def test_alter_fun(
     return dev
 
 
+def _subset_split_by_mask(split_val: Any, keep_mask: np.ndarray, orig_len: int) -> Any:
+    if split_val is None or isinstance(split_val, (int, np.integer)):
+        return split_val
+    if isinstance(split_val, pd.DataFrame):
+        return split_val.iloc[keep_mask] if len(split_val) == orig_len else split_val
+    if isinstance(split_val, pd.Series):
+        return split_val.iloc[keep_mask] if len(split_val) == orig_len else split_val
+    if isinstance(split_val, pd.Categorical):
+        return split_val[keep_mask] if len(split_val) == orig_len else split_val
+    if isinstance(split_val, np.ndarray):
+        return split_val[keep_mask] if split_val.ndim >= 1 and len(split_val) == orig_len else split_val
+    if isinstance(split_val, (list, tuple)):
+        if len(split_val) == orig_len and not (len(split_val) > 0 and isinstance(split_val[0], (list, tuple, pd.Series, pd.Categorical, np.ndarray))):
+            return [v for v, f in zip(split_val, keep_mask) if f]
+        if len(split_val) > 0 and all(isinstance(col_v, (list, tuple, pd.Series, pd.Categorical, np.ndarray)) and len(col_v) == orig_len for col_v in split_val):
+            return [_subset_split_by_mask(col_v, keep_mask, orig_len) for col_v in split_val]
+    return split_val
+
+
+def _subset_oncoprint_anno(anno: Any, keep_idx: np.ndarray, orig_len: int) -> Any:
+    if isinstance(anno, HeatmapAnnotation) and anno.nobs() == orig_len:
+        return anno[keep_idx]
+    return anno
+
+
 def _memo_sort_columns(arr: np.ndarray, gene_order: list[int]) -> list[int]:
     """Classic OncoPrint memoSort across columns given ordered genes `gene_order`."""
     ng, ns, nt = arr.shape
@@ -305,6 +330,7 @@ def oncoPrint(
         str_mat = np.array([[";".join(parsed[r][c]) for c in range(ns)] for r in range(ng)], dtype=object)
 
     # Remove empty rows/columns if requested
+    orig_ng, orig_ns = ng, ns
     if remove_empty_rows and ng > 0:
         keep_r = np.any(arr, axis=(1, 2))
         arr = arr[keep_r, :, :]
@@ -313,6 +339,11 @@ def oncoPrint(
             rownames = [r for r, f in zip(rownames, keep_r) if f]
         if row_labels is not None:
             row_labels = [r for r, f in zip(row_labels, keep_r) if f]
+        if not np.all(keep_r):
+            keep_r_idx = np.where(keep_r)[0]
+            left_annotation = _subset_oncoprint_anno(left_annotation, keep_r_idx, orig_ng)
+            right_annotation = _subset_oncoprint_anno(right_annotation, keep_r_idx, orig_ng)
+            row_split = _subset_split_by_mask(row_split, keep_r, orig_ng)
         ng = arr.shape[0]
     if remove_empty_columns and ns > 0:
         keep_c = np.any(arr, axis=(0, 2))
@@ -322,6 +353,11 @@ def oncoPrint(
             colnames = [c for c, f in zip(colnames, keep_c) if f]
         if column_labels is not None:
             column_labels = [c for c, f in zip(column_labels, keep_c) if f]
+        if not np.all(keep_c):
+            keep_c_idx = np.where(keep_c)[0]
+            top_annotation = _subset_oncoprint_anno(top_annotation, keep_c_idx, orig_ns)
+            bottom_annotation = _subset_oncoprint_anno(bottom_annotation, keep_c_idx, orig_ns)
+            column_split = _subset_split_by_mask(column_split, keep_c, orig_ns)
         ns = arr.shape[1]
 
     # Colors

@@ -576,6 +576,7 @@ class GridDevice:
         self.dpi = float(dpi)
         self.record = record
         self._drawing_vp_guide = False
+        self._zorder_counter: int = 0
         self.commands: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         if ax is not None:
             self.fig = ax.figure
@@ -659,6 +660,10 @@ class GridDevice:
         if w <= 0 or h <= 0:
             return TransformedBbox(Bbox.from_bounds(x0, y0, 0.001, 0.001), self.ax.transData)
         return TransformedBbox(Bbox.from_bounds(x0, y0, w, h), self.ax.transData)
+
+    def _next_zorder(self) -> int:
+        self._zorder_counter += 1
+        return self._zorder_counter
 
     def push_viewport(self, vp: Viewport) -> Viewport:
         if self.record:
@@ -811,6 +816,7 @@ class GridDevice:
             ls_list.append(_linestyle_for_mpl(ltys[k]))
 
         pc = PolyCollection(verts, facecolors=fc, edgecolors=ec, linewidths=lw_list, linestyles=ls_list, antialiaseds=True)
+        pc.set_zorder(self._next_zorder())
         cb = self._clip_bbox(vp)
         if cb is not None:
             pc.set_clip_path(cb.bounds if False else None)
@@ -870,6 +876,7 @@ class GridDevice:
                 edgecolor=c_rgba,
                 linewidth=float(lwds[k]) * 0.75 if c_rgba[3] > 0 else 0.0,
             )
+            patch.set_zorder(self._next_zorder())
             if cb is not None:
                 patch.set_clip_box(cb)
             self.ax.add_patch(patch)
@@ -900,6 +907,7 @@ class GridDevice:
         valid = np.isfinite(xmm) & np.isfinite(ymm)
         if np.all(valid):
             line = Line2D(xmm, ymm, color=col, linewidth=lwd, linestyle=ls, solid_capstyle="butt")
+            line.set_zorder(self._next_zorder())
             cb = self._clip_bbox(self.current_vp)
             if cb is not None:
                 line.set_clip_box(cb)
@@ -917,6 +925,7 @@ class GridDevice:
                     j += 1
                 if j - i >= 2:
                     line = Line2D(xmm[i:j], ymm[i:j], color=col, linewidth=lwd, linestyle=ls)
+                    line.set_zorder(self._next_zorder())
                     if cb is not None:
                         line.set_clip_box(cb)
                     self.ax.add_line(line)
@@ -961,6 +970,7 @@ class GridDevice:
         if not segs:
             return
         lc = LineCollection(segs, colors=colors, linewidths=widths, linestyles=styles)
+        lc.set_zorder(self._next_zorder())
         cb = self._clip_bbox(vp)
         if cb is not None:
             lc.set_clip_box(cb)
@@ -1011,6 +1021,7 @@ class GridDevice:
             lss.append(_linestyle_for_mpl(ltys[k]))
 
         pc = PolyCollection(verts, facecolors=fc, edgecolors=ec, linewidths=lws, linestyles=lss, antialiaseds=True)
+        pc.set_zorder(self._next_zorder())
         cb = self._clip_bbox(self.current_vp)
         if cb is not None:
             pc.set_clip_box(cb)
@@ -1050,6 +1061,7 @@ class GridDevice:
                 edgecolor=e_c,
                 linewidth=float(lwds[k]) * 0.75 if e_c[3] > 0 else 0.0,
             )
+            patch.set_zorder(self._next_zorder())
             if cb is not None:
                 patch.set_clip_box(cb)
             self.ax.add_patch(patch)
@@ -1119,6 +1131,7 @@ class GridDevice:
             if isinstance(pk, str):
                 fs = max(4.0, sk / _MM_PER_BIGPT)
                 txt = self.ax.text(xk, yk, pk, fontsize=fs, color=col_k, ha="center", va="center")
+                txt.set_zorder(self._next_zorder())
                 if cb is not None:
                     txt.set_clip_box(cb)
                 continue
@@ -1173,11 +1186,13 @@ class GridDevice:
                 sc = self.ax.scatter(b["x"], b["y"], s=b["s"], marker=marker, c=b["c"], linewidths=b["lwd"])
             else:  # filled_edge
                 sc = self.ax.scatter(b["x"], b["y"], s=b["s"], marker=marker, facecolors=b["fc"], edgecolors=b["c"], linewidths=b["lwd"])
+            sc.set_zorder(self._next_zorder())
             if cb is not None:
                 sc.set_clip_box(cb)
 
         if diag_segs:
             lc = LineCollection(diag_segs, colors=diag_cols, linewidths=diag_lwds)
+            lc.set_zorder(self._next_zorder())
             if cb is not None:
                 lc.set_clip_box(cb)
             self.ax.add_collection(lc)
@@ -1237,6 +1252,7 @@ class GridDevice:
                 ha=ha,
                 va=va,
             )
+            t.set_zorder(self._next_zorder())
             if cb is not None:
                 t.set_clip_box(cb)
 
@@ -1271,6 +1287,7 @@ class GridDevice:
             aspect="auto",
             interpolation="bilinear" if interpolate else "nearest",
             origin="upper",
+            zorder=self._next_zorder(),
         )
         cb = self._clip_bbox(vp)
         if cb is not None:

@@ -152,6 +152,14 @@ def summary(x: Any) -> Any:
     return repr(x)
 
 
+def _read_bundled_csv(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    if len(df.columns) > 0 and df.columns[0] == "row_name":
+        df = df.set_index("row_name")
+        df.index.name = None
+    return df
+
+
 def load_dataset(name: str) -> Any:
     """Load bundled reference datasets exported from ComplexHeatmap `inst/extdata/`."""
     nm = name.strip().lower()
@@ -165,19 +173,19 @@ def load_dataset(name: str) -> Any:
     if nm in ("gene_expression", "expr"):
         return pd.read_csv(_DATA_DIR / "gene_expression.csv", index_col=0)
     if nm == "gr":
-        return pd.read_csv(_DATA_DIR / "gr.csv")
+        return _read_bundled_csv(_DATA_DIR / "gr.csv")
     if nm == "sample_order":
         txt = (_DATA_DIR / "sample_order.txt").read_text().strip()
         return [line.strip() for line in txt.splitlines() if line.strip()]
     if nm == "meth":
         d = _DATA_DIR / "meth"
-        return {p.stem: pd.read_csv(p, index_col=0) for p in sorted(d.glob("*.csv"))}
+        return {p.stem: _read_bundled_csv(p) for p in sorted(d.glob("*.csv"))}
     if nm == "dmr_summary":
         d = _DATA_DIR / "dmr_summary"
-        return {p.stem: pd.read_csv(p, index_col=0) for p in sorted(d.glob("*.csv"))}
+        return {p.stem: _read_bundled_csv(p) for p in sorted(d.glob("*.csv"))}
     if nm == "random_meth_expr_data":
         d = _DATA_DIR / "random_meth_expr_data"
-        return {p.stem: pd.read_csv(p, index_col=0) for p in sorted(d.glob("*.csv"))}
+        return {p.stem: _read_bundled_csv(p) for p in sorted(d.glob("*.csv"))}
     raise KeyError(
         f"Unknown bundled dataset {name!r}. Available: 'measles', 'rand_mat', 'tcga_lung_adenocarcinoma', "
         "'gene_expression', 'gr', 'sample_order', 'meth', 'dmr_summary', 'random_meth_expr_data'."

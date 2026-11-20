@@ -339,3 +339,76 @@ def test_annotation_extended_and_interior_ht_gap_auto_adjust():
     v2 = Heatmap(mat.iloc[6:, :], name="V2", right_annotation=ra_top[6:])
     res_v = draw(v1 / v2, width=7.0, height=6.5, dpi=100)
     assert float(res_v.ht_list_param["ht_gap"].to_mm("x")[0]) > 5.0
+
+
+def test_raster_zorder_meth_dataset_oncoprint_subset_and_heatmap3d():
+    # 1. Raster heatmap body must paint ABOVE opaque white background (and below later decorations)
+    mat_r = np.tile(np.array([[-2.0, 2.0]]), (6, 3))
+    ht_r = Heatmap(
+        mat_r,
+        name="Rast",
+        col=colorRamp2([-2.0, 0.0, 2.0], ["#2166AC", "white", "#B2182B"]),
+        cluster_rows=False,
+        cluster_columns=False,
+        use_raster=True,
+        border=True,
+    )
+    res_r = draw(ht_r, background="white", width=5.0, height=4.0, dpi=100)
+    with decorate_heatmap_body("Rast"):
+        ch.grid_rect(width=unit(0.4, "npc"), height=unit(0.4, "npc"), gp=ch.gpar(fill="none", col="gold", lwd=3))
+
+    dev = res_r._device
+    assert len(dev.ax.images) >= 1
+    assert dev.ax.images[0].get_zorder() > dev.ax.collections[0].get_zorder()
+
+    buf = io.BytesIO()
+    dev.fig.savefig(buf, format="png", dpi=100, facecolor="white")
+    img = np.asarray(Image.open(buf).convert("RGB"))
+    seekViewport("Rast_heatmap_body_1_1")
+    vp = ch.current_viewport()
+    px0 = int(vp.x0_mm / dev.w_mm * img.shape[1])
+    px1 = int((vp.x0_mm + vp.w_mm) / dev.w_mm * img.shape[1])
+    py0 = int((1.0 - (vp.y0_mm + vp.h_mm) / dev.h_mm) * img.shape[0])
+    py1 = int((1.0 - vp.y0_mm / dev.h_mm) * img.shape[0])
+    body_crop = img[max(0, py0 + 2):max(1, py1 - 2), max(0, px0 + 2):max(1, px1 - 2)]
+    assert np.mean(np.max(body_crop, axis=2) - np.min(body_crop, axis=2) > 40) > 0.25
+
+    # 2. load_dataset("meth") preserves 20 sample columns and named metadata columns
+    meth_ds = ch.load_dataset("meth")
+    assert meth_ds["meth"].shape == (1000, 20)
+    assert meth_ds["expr"].shape == (1000, 20)
+    assert list(meth_ds["row_meta"].columns) == ["direction", "cor_pvalue", "gene_type", "anno", "dist"]
+
+    # 3. oncoPrint subsets custom annotations & split when remove_empty_*=True
+    df_op = ch.load_dataset("tcga_lung_adenocarcinoma").iloc[:15, :30]
+    top_ha = HeatmapAnnotation(
+        cbar=ch.anno_oncoprint_barplot(),
+        Cohort=["A" if j % 2 == 0 else "B" for j in range(df_op.shape[1])],
+        col={"Cohort": {"A": "#E41A1C", "B": "#377EB8"}},
+    )
+    right_ha = ch.rowAnnotation(
+        rbar=ch.anno_oncoprint_barplot(which="row", width=unit(12, "mm")),
+    )
+    op = ch.oncoPrint(
+        df_op,
+        top_annotation=top_ha,
+        right_annotation=right_ha,
+        row_split=["High" if i < 7 else "Low" for i in range(df_op.shape[0])],
+        remove_empty_rows=True,
+        remove_empty_columns=True,
+    )
+    res_op = draw(op, width=8.0, height=5.0, dpi=80)
+    assert res_op._device is not None
+
+    # 4. Vectorized Heatmap3D renders cleanly on measles subset with border lwd
+    measles_sub = ch.load_dataset("measles").iloc[:10, :14]
+    h3 = ch.Heatmap3D(
+        measles_sub,
+        name="Cases",
+        cluster_rows=False,
+        cluster_columns=False,
+        rect_gp=ch.gpar(col="#444444", lwd=0.3),
+    )
+    res_h3 = draw(h3, width=6.0, height=4.5, dpi=80)
+    assert len(res_h3._device.ax.collections) > 0
+    plt.close("all")

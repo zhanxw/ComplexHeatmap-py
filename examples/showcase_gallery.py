@@ -328,7 +328,7 @@ def render_07_multi_heatmap_list() -> None:
         mat_meth,
         name="Methylation",
         col=col_meth,
-        row_split=row_meta.iloc[:, 0].astype(str).tolist(),
+        row_split=row_meta["direction"].astype(str).tolist(),
         top_annotation=ha_meth,
         column_title="Methylation",
         show_row_names=False,

@@ -62,7 +62,93 @@ res._device.fig.savefig("heatmap.png", dpi=150, facecolor="white")
 
 ![Quick Example Output](https://raw.githubusercontent.com/zhanxw/ComplexHeatmap-py/main/examples/output/00_quick_example.png)
 
-## Gallery of Examples & Output Figures
+## R ComplexHeatmap Flagship Examples (Replicated in Python)
+
+The 6 flagship showcase examples from the upstream [jokergoo/ComplexHeatmap](https://github.com/jokergoo/ComplexHeatmap) README are replicated in Python in [`examples/r_readme_examples.py`](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/r_readme_examples.py):
+
+### 1. Visualize Methylation Profile with Complex Annotations
+
+```python
+ht_meth = ch.Heatmap(
+    mat_meth, name="Methylation",
+    col=ch.colorRamp2([0.0, 0.5, 1.0], ["#2166AC", "#F7F7F7", "#B2182B"]),
+    column_split=pd.Categorical(dkfz_subtype, categories=subtypes, ordered=True),
+    column_title="%s", top_annotation=ha_clinical, use_raster=True, border=True,
+)
+ht_expr = ch.Heatmap(
+    mat_expr, name="Expression",
+    col=ch.colorRamp2([-2.0, 0.0, 2.0], ["#1B7837", "#F7F7F7", "#762A83"]),
+    use_raster=True, border=True,
+)
+ch.draw(ht_meth / ht_expr, merge_legends=True)
+```
+
+![Methylation Profile with Complex Annotations](https://raw.githubusercontent.com/zhanxw/ComplexHeatmap-py/main/examples/output/r_readme_01_methylation_profile.png)
+
+### 2. Correlations Between Methylation, Expression and Other Genomic Features
+
+```python
+ds = ch.load_dataset("meth")
+hl = ht_dir + ht_meth + ht_expr + ht_p + ht_gtype + ht_anno + ra_dist + ht_enh
+ch.draw(hl, main_heatmap="Methylation", merge_legends=True)
+```
+
+![Correlations Between Methylation and Expression](https://raw.githubusercontent.com/zhanxw/ComplexHeatmap-py/main/examples/output/r_readme_02_meth_expr_corr.png)
+
+### 3. Visualize Cell Heterogeneity from Single-Cell RNA-Seq
+
+```python
+hl = ht_expr + ht_base + ht_rnp + ht_cc + ht_corr + ch.rowAnnotation(
+    mark=ch.anno_mark(at=marker_idx, labels=marker_names, link_width=ch.unit(6, "mm")),
+)
+ch.draw(hl, main_heatmap="Scaled Expr", merge_legends=True)
+```
+
+![Single-Cell RNA-Seq Heterogeneity](https://raw.githubusercontent.com/zhanxw/ComplexHeatmap-py/main/examples/output/r_readme_03_scrnaseq_heterogeneity.png)
+
+### 4. Making Enhanced OncoPrint
+
+```python
+op = ch.oncoPrint(
+    ch.load_dataset("tcga_lung_adenocarcinoma"),
+    alter_fun=alter_fun, col=alt_col,
+    top_annotation=ha_top, right_annotation=ha_right,
+    remove_empty_columns=True, remove_empty_rows=True,
+)
+ch.draw(op + ht_pathway, main_heatmap=op.name, merge_legends=True)
+```
+
+![Enhanced OncoPrint](https://raw.githubusercontent.com/zhanxw/ComplexHeatmap-py/main/examples/output/r_readme_04_enhanced_oncoprint.png)
+
+### 5. UpSet Plot
+
+```python
+cm = ch.make_comb_mat(sets)
+cm = cm[:, ch.comb_size(cm) >= 3]
+ch.UpSet(
+    cm, comb_order=np.argsort(-ch.comb_size(cm), kind="stable"),
+    comb_col=[deg_palette[d] for d in ch.comb_degree(cm)],
+    top_annotation=ch.upset_top_annotation(cm, add_numbers=True),
+    right_annotation=ch.upset_right_annotation(cm, add_numbers=True),
+).draw()
+```
+
+![UpSet Plot](https://raw.githubusercontent.com/zhanxw/ComplexHeatmap-py/main/examples/output/r_readme_05_upset.png)
+
+### 6. 3D Heatmap (`Heatmap3D`)
+
+```python
+ch.Heatmap3D(
+    ch.load_dataset("measles").loc[top_states],
+    col=ch.colorRamp2([0.0, 4000.0, 20000.0, 80000.0], ["#FFFFFF", "#FFEDA0", "#FEB24C", "#E31A1C"]),
+    name="Cases", cluster_rows=False, cluster_columns=False,
+    bar_angle=55.0, bar_max_length=ch.unit(12, "mm"),
+).draw()
+```
+
+![3D Heatmap of US Measles Cases](https://raw.githubusercontent.com/zhanxw/ComplexHeatmap-py/main/examples/output/r_readme_06_measles_3d.png)
+
+## Additional Feature Gallery
 
 All figures below are generated directly by [`examples/showcase_gallery.py`](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/showcase_gallery.py).
 
@@ -171,7 +257,7 @@ ch.Heatmap3D(mat_3d, name="Intensity", column_title="3D Isometric Heatmap (Heatm
 - **Annotations (`annotations.py`, `anno_funcs.py`)**: All 21 `anno_*` (`anno_simple`, `anno_empty`, `anno_points`, `anno_lines`, `anno_barplot`, `anno_boxplot`, `anno_histogram`, `anno_density`, `anno_joyplot`, `anno_horizon`, `anno_text`, `anno_numeric`, `anno_mark`, `anno_zoom`, `anno_link`, `anno_block`, `anno_summary`, `anno_image`, `anno_customize`, `anno_textbox`, `anno_oncoprint_barplot`) + 6 `row_anno_*` aliases, `HeatmapAnnotation`, `rowAnnotation`, `columnAnnotation`, `SingleAnnotation`, `AnnotationFunction`, `attach_annotation`.
 - **Multi-Heatmap Lists & Legends (`heatmap.py`, `heatmap_list.py`, `legend.py`, `decorate.py`)**: Horizontal (`+`) and vertical (`%v%` / `/`) concatenation, `auto_adjust`, `main_heatmap` alignment, `Legend`/`packLegend` discrete + continuous + unequal-break legends, legend deduplication/`c_ColorMapping`, all 11 `decorate_*` viewport decorators, and slice/subsetting indexing (`ht[i, j]`, `ht_list[i, j]`).
 - **High-Level Genomics & Plots (`oncoprint.py`, `upset.py`, `density.py`, `three_d.py`, `genomic.py`, `translate.py`)**: `oncoPrint` (with memoSort & alteration polygons), `make_comb_mat` / `UpSet` (`distinct`, `intersect`, `union`, genomic intervals, `t(m)`), `densityHeatmap`, `frequencyHeatmap`, `ks_dist`, `bar3D`, `Heatmap3D`, `IRanges`/`GRanges`/`bin_genome`/`normalize_genomic_signals_to_bins`, and drop-in translations `pheatmap`, `heatmap`, `heatmap_2`, `compare_*`.
-- **Examples & Verification**: Complete documentation in the **[ComplexHeatmap-py Complete Reference Book](https://zhanxw.github.io/ComplexHeatmap-reference-py/book/)**, ports of all **102 executable `.Rd` examples** ([examples/run_all_rd_examples.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/run_all_rd_examples.py)), publication gallery ([examples/showcase_gallery.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/showcase_gallery.py)), R-to-Python guide ([examples/r_to_python_guide.md](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/r_to_python_guide.md)), and `pytest` suite (`135 passed`).
+- **Examples & Verification**: Complete documentation in the **[ComplexHeatmap-py Complete Reference Book](https://zhanxw.github.io/ComplexHeatmap-reference-py/book/)**, upstream flagship README replications ([examples/r_readme_examples.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/r_readme_examples.py)), ports of all **102 executable `.Rd` examples** ([examples/run_all_rd_examples.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/run_all_rd_examples.py)), publication gallery ([examples/showcase_gallery.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/showcase_gallery.py)), R-to-Python guide ([examples/r_to_python_guide.md](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/r_to_python_guide.md)), and `pytest` suite (`136 passed`).
 
 ## License & Attribution
 

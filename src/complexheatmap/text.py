@@ -288,6 +288,7 @@ def draw_richtext(
             ec = to_rgba_tuple(bgpk.get("col", "#00000000" if "fill" in bgpk else "#000000FF"))
             lwd = float(bgpk.get("lwd", 1.0)) * 0.75 if ec[3] > 0 else 0.0
             poly = MplPolygon(corners, closed=True, facecolor=fc, edgecolor=ec, linewidth=lwd)
+            poly.set_zorder(dev._next_zorder())
             if cb is not None:
                 poly.set_clip_box(cb)
             dev.ax.add_patch(poly)
@@ -309,6 +310,7 @@ def draw_richtext(
                         color=col, rotation=float(rot), rotation_mode="anchor",
                         ha="left", va="center",
                     )
+                    t.set_zorder(dev._next_zorder())
                     if cb is not None:
                         t.set_clip_box(cb)
                 cur_x += rw
