@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ComplexHeatmap-py"
+version = "0.1.0"
+description = "Python port of the ComplexHeatmap R/Bioconductor package for making complex heatmaps, annotations, oncoPrints, UpSet plots, and density heatmaps."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Xiaowei Zhan", email = "zhanxw@gmail.com"},
+]
+keywords = [
+    "heatmap",
+    "complexheatmap",
+    "bioinformatics",
+    "genomics",
+    "oncoprint",
+    "upset",
+    "matplotlib",
+    "visualization",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pandas>=2.0",
+    "pillow>=10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/zhanxw/ComplexHeatmap-py"
+Repository = "https://github.com/zhanxw/ComplexHeatmap-py"
+Issues = "https://github.com/zhanxw/ComplexHeatmap-py/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["ComplexHeatmap"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+complexheatmap = ["data/*.csv", "data/*.txt", "data/**/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
