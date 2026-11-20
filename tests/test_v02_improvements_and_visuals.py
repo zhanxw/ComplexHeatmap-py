@@ -259,3 +259,83 @@ def test_visual_svg_and_rendered_pixel_layout():
     img3 = np.asarray(Image.open(buf3).convert("RGB"))
     center3 = img3[int(0.2 * img3.shape[0]):int(0.8 * img3.shape[0]), int(0.2 * img3.shape[1]):int(0.8 * img3.shape[1])]
     assert np.mean(np.min(center3, axis=2) < 220) > 0.05
+
+
+def test_annotation_extended_and_interior_ht_gap_auto_adjust():
+    rng = np.random.default_rng(123)
+    mat = pd.DataFrame(
+        rng.standard_normal((12, 10)),
+        index=[f"gene_{i}" for i in range(12)],
+        columns=[f"sample_{j}" for j in range(10)],
+    )
+    ha_top = HeatmapAnnotation(
+        Group=["Ctrl"] * 5 + ["Treat"] * 5,
+        Score=ch.anno_barplot(rng.uniform(0, 1, 10)),
+        col={"Group": {"Ctrl": "#4DAF4A", "Treat": "#E41A1C"}},
+    )
+    # Right-side annotation labels should report non-zero right extension (> 10 mm)
+    assert ha_top.anno_list["Group"].extended.to_mm("x")[3] > 10.0
+    assert ha_top.extended.to_mm("x")[3] > 10.0
+
+    # Left / top / bottom name_side extensions also populate the matching side index
+    ha_left = HeatmapAnnotation(LongName=["A"] * 10, annotation_name_side="left")
+    assert ha_left.extended.to_mm("x")[1] > 10.0
+    ra_top = ch.rowAnnotation(TopLbl=list(range(12)), annotation_name_side="top", annotation_name_rot=0)
+    ra_bot = ch.rowAnnotation(BotLbl=list(range(12)), annotation_name_side="bottom", annotation_name_rot=0)
+    assert ra_top.extended.to_mm("x")[2] > 3.0
+    assert ra_bot.extended.to_mm("x")[0] > 3.0
+
+    ht1 = Heatmap(mat, name="Expr", row_km=2, top_annotation=ha_top, border=True)
+    ht2 = Heatmap(mat.iloc[:, :4] * 2, name="Delta")
+    with ch.ht_opt.local(kmeans_seed=123):
+        res = draw(ht1 + ht2, width=9.0, height=6.5, dpi=100)
+
+    gap_mm = float(res.ht_list_param["ht_gap"].to_mm("x")[0])
+    assert gap_mm > 12.0
+
+    # Verify rendered "Group" and "Score" annotation labels stay left of Delta's column dendrogram viewport
+    # and do not overlap vertically with each other (disambiguating from legend title "Group").
+    dev = res._device
+    dev.fig.canvas.draw()
+    renderer = dev.fig.canvas.get_renderer()
+    inv_trans = dev.ax.transData.inverted()
+
+    seekViewport("annotation_Group_1")
+    vp_group = ch.current_viewport()
+    seekViewport("annotation_Score_1")
+    vp_score = ch.current_viewport()
+    anno_bands = {
+        "Group": (vp_group.y0_mm, vp_group.y0_mm + vp_group.h_mm),
+        "Score": (vp_score.y0_mm, vp_score.y0_mm + vp_score.h_mm),
+    }
+
+    label_bboxes = {}
+    for txt in dev.ax.texts:
+        s = txt.get_text()
+        if s in anno_bands:
+            bb = txt.get_window_extent(renderer=renderer)
+            pts_mm = inv_trans.transform([[bb.x0, bb.y0], [bb.x1, bb.y1]])
+            ymid = 0.5 * (float(pts_mm[0, 1]) + float(pts_mm[1, 1]))
+            y_lo, y_hi = anno_bands[s]
+            if y_lo <= ymid <= y_hi:
+                label_bboxes[s] = (float(pts_mm[0, 0]), float(pts_mm[0, 1]), float(pts_mm[1, 0]), float(pts_mm[1, 1]))
+    assert set(label_bboxes.keys()) == {"Group", "Score"}
+
+    # Check Delta column dendrogram left bound in mm and vertical separation
+    seekViewport("Delta_dend_column_1")
+    delta_dend_vp = ch.current_viewport()
+    assert label_bboxes["Group"][2] < delta_dend_vp.x0_mm
+    assert label_bboxes["Score"][2] < delta_dend_vp.x0_mm
+    assert label_bboxes["Score"][3] < label_bboxes["Group"][1]
+
+    # Explicit ht_gap / gap override must be respected untouched
+    res_exp = draw(ht1 + ht2, ht_gap=unit(3.0, "mm"), width=9.0, height=6.5, dpi=100)
+    assert float(res_exp.ht_list_param["ht_gap"].to_mm("x")[0]) == pytest.approx(3.0)
+    res_gap_alias = draw(ht1 + ht2, gap=unit(4.5, "mm"), width=9.0, height=6.5, dpi=100)
+    assert float(res_gap_alias.ht_list_param["ht_gap"].to_mm("x")[0]) == pytest.approx(4.5)
+
+    # Vertical concatenation auto-expands gap when row annotation labels extend vertically
+    v1 = Heatmap(mat.iloc[:6, :], name="V1", right_annotation=ra_bot[:6], show_column_names=False)
+    v2 = Heatmap(mat.iloc[6:, :], name="V2", right_annotation=ra_top[6:])
+    res_v = draw(v1 / v2, width=7.0, height=6.5, dpi=100)
+    assert float(res_v.ht_list_param["ht_gap"].to_mm("x")[0]) > 5.0

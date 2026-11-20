@@ -22,6 +22,8 @@ from .grid import (
     grid_rect,
     grid_text,
     linesGrob,
+    max_text_height,
+    max_text_width,
     popViewport,
     pushViewport,
     segmentsGrob,
@@ -634,6 +636,7 @@ class SingleAnnotation:
             self.show_legend = False
             if not af.show_name:
                 show_name = False
+            self._fun_extended: Unit = af.extended
             self.extended = af.extended
             self.width = af.width
             self.height = af.height
@@ -698,6 +701,7 @@ class SingleAnnotation:
             )
             self.width = self.fun.width
             self.height = self.fun.height
+            self._fun_extended = self.fun.extended
             self.extended = self.fun.extended
             self.subsettable = self.fun.subsettable
 
@@ -789,6 +793,30 @@ class SingleAnnotation:
             "offset": off_u,
             "label": lbl_txt,
         }
+        self._recompute_extended()
+
+    def _recompute_extended(self) -> None:
+        base_mm = [float(v) for v in self._fun_extended.to_mm("x")]
+        np_d = self.name_param
+        if np_d.get("show"):
+            lbl = np_d["label"]
+            gp_d = np_d["gp"]
+            rot = float(np_d["rot"])
+            off_u = np_d["offset"]
+            side = np_d["side"]
+            if self.which == "column":
+                tw_mm = convertWidth(max_text_width(lbl, gp=gp_d, rot=rot) + off_u, "mm", valueOnly=True)
+                if side == "left":
+                    base_mm[1] = max(base_mm[1], tw_mm)
+                elif side == "right":
+                    base_mm[3] = max(base_mm[3], tw_mm)
+            else:
+                th_mm = convertHeight(max_text_height(lbl, gp=gp_d, rot=rot) + off_u, "mm", valueOnly=True)
+                if side == "bottom":
+                    base_mm[0] = max(base_mm[0], th_mm)
+                elif side == "top":
+                    base_mm[2] = max(base_mm[2], th_mm)
+        self.extended = unit(base_mm, "mm")
 
     def copy_all(self) -> "SingleAnnotation":
         cp = copy.copy(self)
@@ -819,6 +847,8 @@ class SingleAnnotation:
         cp.fun = cp.fun[i]
         cp.width = cp.fun.width
         cp.height = cp.fun.height
+        cp._fun_extended = cp.fun.extended
+        cp._recompute_extended()
         return cp
 
     def draw(
@@ -1216,6 +1246,7 @@ class HeatmapAnnotation(AdditiveUnit):
                 for sa in targets:
                     sa.name_param["offset"] = u_mx
                     sa.name_param[coord_key] = unit(base_val, "npc") + sign * u_mx
+                    sa._recompute_extended()
 
     def re_size(
         self,

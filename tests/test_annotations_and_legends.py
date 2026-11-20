@@ -108,6 +108,8 @@ def test_legends_and_packlegend():
 def test_all_11_decorate_functions():
     rng = np.random.default_rng(11)
     mat = pd.DataFrame(rng.standard_normal((10, 8)), index=[f"r{i}" for i in range(10)], columns=[f"c{j}" for j in range(8)])
+    mat.iloc[:5, :4] -= 2.5
+    mat.iloc[5:, 4:] += 2.5
     ha = HeatmapAnnotation(grp=["A", "B"] * 4)
     ht = Heatmap(
         mat,
@@ -118,7 +120,8 @@ def test_all_11_decorate_functions():
         column_title=["C1", "C2"],
         top_annotation=ha,
     )
-    draw(ht)
+    with ch.ht_opt.local(kmeans_seed=11):
+        draw(ht)
     comps = list_components()
     assert "M_heatmap_body_1_1" in comps
     assert "annotation_grp_1" in comps

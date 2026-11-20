@@ -460,6 +460,7 @@ class HeatmapList(AdditiveUnit):
         legend_grouping: str = "adjusted",
 
         ht_gap: Unit | None = None,
+        gap: Unit | None = None,
         main_heatmap: int | str | None = None,
         padding: Any = None,
         auto_adjust: bool = True,
@@ -514,7 +515,9 @@ class HeatmapList(AdditiveUnit):
             work.layout["initialized"] = True
             return work
 
-        gap_arg = ht_opt.ht_gap if ht_gap is None and hasattr(ht_opt, "ht_gap") and ht_opt.ht_gap is not None else ht_gap
+        eff_ht_gap_arg = ht_gap if ht_gap is not None else gap
+        user_explicit_ht_gap = eff_ht_gap_arg is not None
+        gap_arg = ht_opt.ht_gap if eff_ht_gap_arg is None and hasattr(ht_opt, "ht_gap") and ht_opt.ht_gap is not None else eff_ht_gap_arg
         eff_merge_legends = bool(ht_opt.merge_legends) if merge_legends is None else bool(merge_legends)
         if ht_opt.validate_names:
             seen_hn: set[str] = set()
@@ -807,7 +810,7 @@ class HeatmapList(AdditiveUnit):
         work.ht_list_param["padding"] = padding
 
         # Equalize perpendicular layout components across heatmaps
-        work._adjust_heatmap_list()
+        work._adjust_heatmap_list(user_explicit_ht_gap=user_explicit_ht_gap)
 
         # Global titles
         ct_gp = check_gp(gpar(fontsize=14) if column_title_gp is None else column_title_gp)
@@ -902,7 +905,7 @@ class HeatmapList(AdditiveUnit):
         work.layout["initialized"] = True
         return work
 
-    def _adjust_heatmap_list(self) -> None:
+    def _adjust_heatmap_list(self, user_explicit_ht_gap: bool = False) -> None:
         ht_indices = [i for i, item in enumerate(self.ht_list) if isinstance(item, Heatmap)]
         if not ht_indices:
             self.layout["heatmap_list_padding"] = [0.0, 0.0, 0.0, 0.0]
@@ -981,6 +984,66 @@ class HeatmapList(AdditiveUnit):
                         e_r = max(e_r, float(ann.extended.to_mm("x")[3]))
                 ext_right = max(0.0, e_r - right_used)
             self.layout["heatmap_list_padding"] = [pad_bot, ext_left, pad_top, ext_right]
+
+            # Auto-expand interior ht_gap so extended column-annotation labels/axes do not collide with neighbors
+            if not user_explicit_ht_gap and self.ht_list_param.get("auto_adjust", True) and len(self.ht_list) > 1:
+                def _has_top_band(item: Heatmap | HeatmapAnnotation) -> bool:
+                    if isinstance(item, Heatmap):
+                        return (
+                            item.top_annotation is not None
+                            or (
+                                bool(item.column_dend_param.get("show"))
+                                and item.column_dend_param.get("side") == "top"
+                                and any(d is not None for d in item.column_dend_list)
+                            )
+                            or (
+                                bool(item.column_names_param.get("show"))
+                                and item.column_names_param.get("side") == "top"
+                            )
+                        )
+                    return float(item.extended.to_mm("x")[2]) > 0.0
+
+                def _has_bot_band(item: Heatmap | HeatmapAnnotation) -> bool:
+                    if isinstance(item, Heatmap):
+                        return (
+                            item.bottom_annotation is not None
+                            or (
+                                bool(item.column_dend_param.get("show"))
+                                and item.column_dend_param.get("side") == "bottom"
+                                and any(d is not None for d in item.column_dend_list)
+                            )
+                            or (
+                                bool(item.column_names_param.get("show"))
+                                and item.column_names_param.get("side") == "bottom"
+                            )
+                        )
+                    return float(item.extended.to_mm("x")[0]) > 0.0
+
+                gaps_mm = [float(v) for v in self.ht_list_param["ht_gap"].to_mm("x")]
+                for i in range(len(self.ht_list) - 1):
+                    base_gap = gaps_mm[i]
+                    left_item = self.ht_list[i]
+                    right_item = self.ht_list[i + 1]
+                    left_right_w = (
+                        sum(convertWidth(left_item.layout["layout_size"][f"{c}_width"], "mm", valueOnly=True) for c in ("row_names_right", "row_anno_right", "row_dend_right", "row_title_right"))
+                        if isinstance(left_item, Heatmap) else 0.0
+                    )
+                    right_left_w = (
+                        sum(convertWidth(right_item.layout["layout_size"][f"{c}_width"], "mm", valueOnly=True) for c in ("row_title_left", "row_dend_left", "row_anno_left", "row_names_left"))
+                        if isinstance(right_item, Heatmap) else 0.0
+                    )
+                    l_top_r = float(left_item.top_annotation.extended.to_mm("x")[3]) if (isinstance(left_item, Heatmap) and left_item.top_annotation is not None) else 0.0
+                    r_top_l = float(right_item.top_annotation.extended.to_mm("x")[1]) if (isinstance(right_item, Heatmap) and right_item.top_annotation is not None) else 0.0
+                    top_ext_need = (l_top_r if _has_top_band(right_item) else 0.0) + (r_top_l if _has_top_band(left_item) else 0.0)
+                    top_gap_need = (top_ext_need + base_gap - left_right_w - right_left_w) if top_ext_need > 0.0 else 0.0
+
+                    l_bot_r = float(left_item.bottom_annotation.extended.to_mm("x")[3]) if (isinstance(left_item, Heatmap) and left_item.bottom_annotation is not None) else 0.0
+                    r_bot_l = float(right_item.bottom_annotation.extended.to_mm("x")[1]) if (isinstance(right_item, Heatmap) and right_item.bottom_annotation is not None) else 0.0
+                    bot_ext_need = (l_bot_r if _has_bot_band(right_item) else 0.0) + (r_bot_l if _has_bot_band(left_item) else 0.0)
+                    bot_gap_need = (bot_ext_need + base_gap - left_right_w - right_left_w) if bot_ext_need > 0.0 else 0.0
+
+                    gaps_mm[i] = max(base_gap, top_gap_need, bot_gap_need)
+                self.ht_list_param["ht_gap"] = unit(gaps_mm, "mm")
         else:
             row_pad_mm = convertWidth(as_unit(ht_opt.ROW_ANNO_PADDING, "mm"), "mm", valueOnly=True)
             left_ws = [convertWidth(self.ht_list[i].left_annotation.width, "mm", valueOnly=True) for i in ht_indices if self.ht_list[i].left_annotation is not None]
@@ -1015,7 +1078,103 @@ class HeatmapList(AdditiveUnit):
                 used_r = convertWidth(ls_i["row_names_right_width"], "mm", valueOnly=True) + convertWidth(ls_i["row_anno_right_width"], "mm", valueOnly=True)
                 ls_i["row_dend_left_width"] = unit(max(0.0, max_left_comp - used_l), "mm")
                 ls_i["row_dend_right_width"] = unit(max(0.0, max_right_comp - used_r), "mm")
-            self.layout["heatmap_list_padding"] = [0.0, 0.0, 0.0, 0.0]
+
+            # Compute outer padding for extended column-annotation left/right labels and outer row-annotation top/bottom labels
+            ext_left = 0.0
+            ext_right = 0.0
+            for item in self.ht_list:
+                if isinstance(item, HeatmapAnnotation):
+                    e = item.extended.to_mm("x")
+                    ext_left = max(ext_left, float(e[1]))
+                    ext_right = max(ext_right, float(e[3]))
+                elif isinstance(item, Heatmap):
+                    for ann in (item.top_annotation, item.bottom_annotation):
+                        if ann is not None:
+                            e = ann.extended.to_mm("x")
+                            ext_left = max(ext_left, float(e[1]))
+                            ext_right = max(ext_right, float(e[3]))
+            pad_left = max(0.0, ext_left - max_left_comp - max_rt_left)
+            pad_right = max(0.0, ext_right - max_right_comp - max_rt_right)
+
+            pad_top = 0.0
+            pad_bot = 0.0
+            first_item = self.ht_list[0]
+            if isinstance(first_item, Heatmap):
+                top_used = sum(convertHeight(first_item.layout["layout_size"][f"{c}_height"], "mm", valueOnly=True) for c in ("column_title_top", "column_dend_top", "column_names_top", "column_anno_top"))
+                e_t = 0.0
+                for ann in (first_item.left_annotation, first_item.right_annotation):
+                    if ann is not None:
+                        e_t = max(e_t, float(ann.extended.to_mm("x")[2]))
+                pad_top = max(0.0, e_t - top_used)
+            last_item = self.ht_list[-1]
+            if isinstance(last_item, Heatmap):
+                bot_used = sum(convertHeight(last_item.layout["layout_size"][f"{c}_height"], "mm", valueOnly=True) for c in ("column_title_bottom", "column_dend_bottom", "column_names_bottom", "column_anno_bottom"))
+                e_b = 0.0
+                for ann in (last_item.left_annotation, last_item.right_annotation):
+                    if ann is not None:
+                        e_b = max(e_b, float(ann.extended.to_mm("x")[0]))
+                pad_bot = max(0.0, e_b - bot_used)
+            self.layout["heatmap_list_padding"] = [pad_bot, pad_left, pad_top, pad_right]
+
+            # Auto-expand interior ht_gap so extended row-annotation labels/axes do not collide with vertical neighbors
+            if not user_explicit_ht_gap and self.ht_list_param.get("auto_adjust", True) and len(self.ht_list) > 1:
+                def _has_left_band(item: Heatmap | HeatmapAnnotation) -> bool:
+                    if isinstance(item, Heatmap):
+                        return (
+                            item.left_annotation is not None
+                            or (
+                                bool(item.row_dend_param.get("show"))
+                                and item.row_dend_param.get("side") == "left"
+                                and any(d is not None for d in item.row_dend_list)
+                            )
+                            or (
+                                bool(item.row_names_param.get("show"))
+                                and item.row_names_param.get("side") == "left"
+                            )
+                        )
+                    return float(item.extended.to_mm("x")[1]) > 0.0
+
+                def _has_right_band(item: Heatmap | HeatmapAnnotation) -> bool:
+                    if isinstance(item, Heatmap):
+                        return (
+                            item.right_annotation is not None
+                            or (
+                                bool(item.row_dend_param.get("show"))
+                                and item.row_dend_param.get("side") == "right"
+                                and any(d is not None for d in item.row_dend_list)
+                            )
+                            or (
+                                bool(item.row_names_param.get("show"))
+                                and item.row_names_param.get("side") == "right"
+                            )
+                        )
+                    return float(item.extended.to_mm("x")[3]) > 0.0
+
+                gaps_mm = [float(v) for v in self.ht_list_param["ht_gap"].to_mm("x")]
+                for i in range(len(self.ht_list) - 1):
+                    base_gap = gaps_mm[i]
+                    top_item = self.ht_list[i]
+                    bot_item = self.ht_list[i + 1]
+                    top_bot_h = (
+                        sum(convertHeight(top_item.layout["layout_size"][f"{c}_height"], "mm", valueOnly=True) for c in ("column_names_bottom", "column_anno_bottom", "column_dend_bottom", "column_title_bottom"))
+                        if isinstance(top_item, Heatmap) else 0.0
+                    )
+                    bot_top_h = (
+                        sum(convertHeight(bot_item.layout["layout_size"][f"{c}_height"], "mm", valueOnly=True) for c in ("column_title_top", "column_dend_top", "column_anno_top", "column_names_top"))
+                        if isinstance(bot_item, Heatmap) else 0.0
+                    )
+                    l_top_b = float(top_item.left_annotation.extended.to_mm("x")[0]) if (isinstance(top_item, Heatmap) and top_item.left_annotation is not None) else 0.0
+                    l_bot_t = float(bot_item.left_annotation.extended.to_mm("x")[2]) if (isinstance(bot_item, Heatmap) and bot_item.left_annotation is not None) else 0.0
+                    left_ext_need = (l_top_b if _has_left_band(bot_item) else 0.0) + (l_bot_t if _has_left_band(top_item) else 0.0)
+                    left_gap_need = (left_ext_need + base_gap - top_bot_h - bot_top_h) if left_ext_need > 0.0 else 0.0
+
+                    r_top_b = float(top_item.right_annotation.extended.to_mm("x")[0]) if (isinstance(top_item, Heatmap) and top_item.right_annotation is not None) else 0.0
+                    r_bot_t = float(bot_item.right_annotation.extended.to_mm("x")[2]) if (isinstance(bot_item, Heatmap) and bot_item.right_annotation is not None) else 0.0
+                    right_ext_need = (r_top_b if _has_right_band(bot_item) else 0.0) + (r_bot_t if _has_right_band(top_item) else 0.0)
+                    right_gap_need = (right_ext_need + base_gap - top_bot_h - bot_top_h) if right_ext_need > 0.0 else 0.0
+
+                    gaps_mm[i] = max(base_gap, left_gap_need, right_gap_need)
+                self.ht_list_param["ht_gap"] = unit(gaps_mm, "mm")
 
     def _compute_heatmap_list_spans(self, avail_w_mm: float, avail_h_mm: float) -> list[float]:
         """Allocate exact mm widths (horizontal) or heights (vertical) for each item in `ht_list`."""
