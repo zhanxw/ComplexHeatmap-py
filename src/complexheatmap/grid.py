@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextvars import ContextVar
 import copy
 import math
 from typing import Any, Callable, Sequence
 
 import matplotlib
-import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.collections import LineCollection, PolyCollection
+from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyBboxPatch, Polygon, Rectangle
 from matplotlib.transforms import Bbox, TransformedBbox
+import matplotlib.pyplot as plt
 import numpy as np
 
 from .colors import grid_pretty, pretty_breaks, to_hex_rgba, to_rgba_tuple
@@ -566,25 +569,50 @@ class GridDevice:
         width_in: float = 8.0,
         height_in: float = 8.0,
         dpi: float = 100.0,
-        fig: matplotlib.figure.Figure | None = None,
+        fig: Any = None,
+        ax: Any = None,
         record: bool = False,
     ) -> None:
         self.dpi = float(dpi)
         self.record = record
+        self._drawing_vp_guide = False
         self.commands: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-        if fig is None:
-            self.fig = plt.figure(figsize=(width_in, height_in), dpi=self.dpi)
-        else:
+        if ax is not None:
+            self.fig = ax.figure
+            self.ax = ax
+            self.ax.set_axis_off()
+            self.ax.set_aspect("auto")
+            fig_w_in, fig_h_in = self.fig.get_size_inches()
+            pos = self.ax.get_position()
+            self.w_mm = max(1.0, float(fig_w_in * pos.width) * _MM_PER_INCH)
+            self.h_mm = max(1.0, float(fig_h_in * pos.height) * _MM_PER_INCH)
+        elif fig is not None and fig.__class__.__name__ == "SubFigure":
             self.fig = fig
-            self.fig.clf()
-            width_in, height_in = self.fig.get_size_inches()
-        self.w_mm = float(width_in) * _MM_PER_INCH
-        self.h_mm = float(height_in) * _MM_PER_INCH
-        self.ax = self.fig.add_axes([0.0, 0.0, 1.0, 1.0])
+            fig_w_in, fig_h_in = fig.figure.get_size_inches()
+            bb = fig.bbox_relative
+            self.w_mm = max(1.0, float(fig_w_in * bb.width) * _MM_PER_INCH)
+            self.h_mm = max(1.0, float(fig_h_in * bb.height) * _MM_PER_INCH)
+            self.ax = self.fig.add_axes([0.0, 0.0, 1.0, 1.0])
+            self.ax.set_axis_off()
+            self.ax.set_aspect("auto")
+        else:
+            if fig is None:
+                self.fig = Figure(figsize=(width_in, height_in), dpi=self.dpi)
+                FigureCanvasAgg(self.fig)
+            else:
+                self.fig = fig
+                self.fig.clf()
+                if getattr(self.fig, "canvas", None) is None:
+                    FigureCanvasAgg(self.fig)
+                width_in, height_in = self.fig.get_size_inches()
+            self.w_mm = float(width_in) * _MM_PER_INCH
+            self.h_mm = float(height_in) * _MM_PER_INCH
+            self.ax = self.fig.add_axes([0.0, 0.0, 1.0, 1.0])
+            self.ax.set_axis_off()
+            self.ax.set_aspect("auto")
+
         self.ax.set_xlim(0.0, self.w_mm)
         self.ax.set_ylim(0.0, self.h_mm)
-        self.ax.set_axis_off()
-        self.ax.set_aspect("auto")
 
         root = Viewport(
             x=unit(0.5, "npc"), y=unit(0.5, "npc"),
@@ -662,8 +690,17 @@ class GridDevice:
             vp_copy.clip_rect_mm = parent.clip_rect_mm
 
         self.vp_stack.append(vp_copy)
+        vp_copy._stack_snapshot = list(self.vp_stack)
         if vp_copy.name:
             self.named_viewports[vp_copy.name] = vp_copy
+            if not self._drawing_vp_guide and not self.record and vp_copy.name != "ROOT":
+                from ._options import ht_opt
+                if ht_opt.show_vp:
+                    self._drawing_vp_guide = True
+                    try:
+                        self.draw_rect(gp=gpar(fill=None, col="#88888888", lty="dashed", lwd=0.5))
+                    finally:
+                        self._drawing_vp_guide = False
         return vp_copy
 
     def pop_viewport(self, n: int = 1) -> None:
@@ -685,8 +722,11 @@ class GridDevice:
         if name not in self.named_viewports:
             raise KeyError(f"Viewport {name!r} not found.")
         target = self.named_viewports[name]
-        # Replace top with a clean stack [root, target]
-        self.vp_stack = [self.vp_stack[0], target]
+        snap = getattr(target, "_stack_snapshot", None)
+        if snap:
+            self.vp_stack = list(snap)
+        else:
+            self.vp_stack = [self.vp_stack[0], target]
         return target
 
     def _xy_mm(self, x: Any, y: Any, default_units: str = "npc") -> tuple[np.ndarray, np.ndarray]:
@@ -1044,7 +1084,27 @@ class GridDevice:
         lwds = gp_n.get("lwd", [1.0] * n)
         cb = self._clip_bbox(vp)
 
-        # Group simple markers or draw per-point accurately in mm
+        filled_no_edge = {15: "s", 16: "o", 17: "^", 18: "D", 19: "o", 20: "o"}
+        hollow_map = {0: "s", 1: "o", 2: "^", 5: "D", 6: "v"}
+        line_map = {3: "+", 4: "x", 8: "*"}
+        filled_edge_map = {21: "o", 22: "s", 23: "D", 24: "^", 25: "v"}
+        comp_base_map = {7: "s", 9: "D", 10: "o", 12: "s", 13: "o", 14: "s"}
+
+        # Group markers into vectorized batches per (category, marker_symbol)
+        scatter_batches: dict[tuple[str, str], dict[str, list[Any]]] = {}
+        diag_segs: list[Any] = []
+        diag_cols: list[Any] = []
+        diag_lwds: list[float] = []
+
+        def _add_batch(cat: str, marker: str, xk: float, yk: float, area: float, col_k: tuple[float, ...], fill_k: tuple[float, ...], lwd_k: float) -> None:
+            b = scatter_batches.setdefault((cat, marker), {"x": [], "y": [], "s": [], "c": [], "fc": [], "lwd": []})
+            b["x"].append(xk)
+            b["y"].append(yk)
+            b["s"].append(area)
+            b["c"].append(col_k)
+            b["fc"].append(fill_k)
+            b["lwd"].append(lwd_k)
+
         for k in range(n):
             xk, yk, sk = float(xmm[k]), float(ymm[k]), float(sz_mm[k])
             if not (math.isfinite(xk) and math.isfinite(yk)):
@@ -1066,67 +1126,61 @@ class GridDevice:
             code = int(pk)
             r = sk * 0.45
             if code in (26, 27, 28):
-                # Custom ComplexHeatmap diagonal markers
-                segs = []
                 if code in (26, 28):
-                    segs.append([(xk - r, yk - r), (xk + r, yk + r)])
+                    diag_segs.append([(xk - r, yk - r), (xk + r, yk + r)])
+                    diag_cols.append(col_k)
+                    diag_lwds.append(lwd_k)
                 if code in (27, 28):
-                    segs.append([(xk - r, yk + r), (xk + r, yk - r)])
-                lc = LineCollection(segs, colors=[col_k] * len(segs), linewidths=lwd_k)
-                if cb is not None:
-                    lc.set_clip_box(cb)
-                self.ax.add_collection(lc)
+                    diag_segs.append([(xk - r, yk + r), (xk + r, yk - r)])
+                    diag_cols.append(col_k)
+                    diag_lwds.append(lwd_k)
                 continue
 
-            # Matplotlib scatter uses area in pt^2
             s_pt = max(1.0, sk / _MM_PER_BIGPT)
             if code == 20:
                 s_pt *= 0.67
             area = s_pt ** 2
 
-            filled_no_edge = {15: "s", 16: "o", 17: "^", 18: "D", 19: "o", 20: "o"}
-            hollow_map = {0: "s", 1: "o", 2: "^", 5: "D", 6: "v"}
-            line_map = {3: "+", 4: "x", 8: "*"}
-            filled_edge_map = {21: "o", 22: "s", 23: "D", 24: "^", 25: "v"}
-
             if code in filled_no_edge:
-                sc = self.ax.scatter([xk], [yk], s=area, marker=filled_no_edge[code], c=[col_k], edgecolors="none")
-                if cb is not None:
-                    sc.set_clip_box(cb)
+                _add_batch("filled", filled_no_edge[code], xk, yk, area, col_k, fill_k, lwd_k)
             elif code in hollow_map:
-                sc = self.ax.scatter([xk], [yk], s=area, marker=hollow_map[code], facecolors="none", edgecolors=[col_k], linewidths=lwd_k)
-                if cb is not None:
-                    sc.set_clip_box(cb)
+                _add_batch("hollow", hollow_map[code], xk, yk, area, col_k, fill_k, lwd_k)
             elif code in line_map:
-                sc = self.ax.scatter([xk], [yk], s=area, marker=line_map[code], c=[col_k], linewidths=lwd_k)
-                if cb is not None:
-                    sc.set_clip_box(cb)
+                _add_batch("line", line_map[code], xk, yk, area, col_k, fill_k, lwd_k)
             elif code in filled_edge_map:
-                sc = self.ax.scatter([xk], [yk], s=area, marker=filled_edge_map[code], facecolors=[fill_k], edgecolors=[col_k], linewidths=lwd_k)
-                if cb is not None:
-                    sc.set_clip_box(cb)
+                _add_batch("filled_edge", filled_edge_map[code], xk, yk, area, col_k, fill_k, lwd_k)
             else:
-                # Composite markers (7, 9, 10, 11, 12, 13, 14)
-                base = {7: "s", 9: "D", 10: "o", 12: "s", 13: "o", 14: "s"}.get(code, "o")
-                sc = self.ax.scatter([xk], [yk], s=area, marker=base, facecolors="none", edgecolors=[col_k], linewidths=lwd_k)
-                if cb is not None:
-                    sc.set_clip_box(cb)
-                extra_segs = []
+                base = comp_base_map.get(code, "o")
+                _add_batch("hollow", base, xk, yk, area, col_k, fill_k, lwd_k)
                 if code in (7, 13):
-                    extra_segs = [[(xk - r, yk - r), (xk + r, yk + r)], [(xk - r, yk + r), (xk + r, yk - r)]]
+                    diag_segs.extend([[(xk - r, yk - r), (xk + r, yk + r)], [(xk - r, yk + r), (xk + r, yk - r)]])
+                    diag_cols.extend([col_k, col_k])
+                    diag_lwds.extend([lwd_k, lwd_k])
                 elif code in (9, 10, 12):
-                    extra_segs = [[(xk - r, yk), (xk + r, yk)], [(xk, yk - r), (xk, yk + r)]]
+                    diag_segs.extend([[(xk - r, yk), (xk + r, yk)], [(xk, yk - r), (xk, yk + r)]])
+                    diag_cols.extend([col_k, col_k])
+                    diag_lwds.extend([lwd_k, lwd_k])
                 elif code == 11:
-                    sc2 = self.ax.scatter([xk], [yk], s=area, marker="^", facecolors="none", edgecolors=[col_k], linewidths=lwd_k)
-                    sc3 = self.ax.scatter([xk], [yk], s=area, marker="v", facecolors="none", edgecolors=[col_k], linewidths=lwd_k)
-                    if cb is not None:
-                        sc2.set_clip_box(cb)
-                        sc3.set_clip_box(cb)
-                if extra_segs:
-                    lc = LineCollection(extra_segs, colors=[col_k] * len(extra_segs), linewidths=lwd_k)
-                    if cb is not None:
-                        lc.set_clip_box(cb)
-                    self.ax.add_collection(lc)
+                    _add_batch("hollow", "^", xk, yk, area, col_k, fill_k, lwd_k)
+                    _add_batch("hollow", "v", xk, yk, area, col_k, fill_k, lwd_k)
+
+        for (cat, marker), b in scatter_batches.items():
+            if cat == "filled":
+                sc = self.ax.scatter(b["x"], b["y"], s=b["s"], marker=marker, c=b["c"], edgecolors="none")
+            elif cat == "hollow":
+                sc = self.ax.scatter(b["x"], b["y"], s=b["s"], marker=marker, facecolors="none", edgecolors=b["c"], linewidths=b["lwd"])
+            elif cat == "line":
+                sc = self.ax.scatter(b["x"], b["y"], s=b["s"], marker=marker, c=b["c"], linewidths=b["lwd"])
+            else:  # filled_edge
+                sc = self.ax.scatter(b["x"], b["y"], s=b["s"], marker=marker, facecolors=b["fc"], edgecolors=b["c"], linewidths=b["lwd"])
+            if cb is not None:
+                sc.set_clip_box(cb)
+
+        if diag_segs:
+            lc = LineCollection(diag_segs, colors=diag_cols, linewidths=diag_lwds)
+            if cb is not None:
+                lc.set_clip_box(cb)
+            self.ax.add_collection(lc)
 
     def draw_text(
         self,
@@ -1223,7 +1277,45 @@ class GridDevice:
             im.set_clip_box(cb)
 
 
-_DEVICE_STACK: list[GridDevice] = []
+_CTX_DEVICE_STACK: ContextVar[list[GridDevice] | None] = ContextVar("complexheatmap_device_stack", default=None)
+
+
+class _ContextDeviceStack:
+    """ContextVar-backed list proxy isolating active GridDevice stacks per thread/async task."""
+
+    def _list(self) -> list[GridDevice]:
+        st = _CTX_DEVICE_STACK.get()
+        if st is None:
+            st = []
+            _CTX_DEVICE_STACK.set(st)
+        return st
+
+    def append(self, dev: GridDevice) -> None:
+        self._list().append(dev)
+
+    def pop(self, index: int = -1) -> GridDevice:
+        return self._list().pop(index)
+
+    def clear(self) -> None:
+        self._list().clear()
+
+    def __len__(self) -> int:
+        return len(self._list())
+
+    def __bool__(self) -> bool:
+        return bool(self._list())
+
+    def __iter__(self):
+        return iter(self._list())
+
+    def __getitem__(self, idx: Any) -> Any:
+        return self._list()[idx]
+
+    def __setitem__(self, idx: Any, val: Any) -> None:
+        self._list()[idx] = val
+
+
+_DEVICE_STACK = _ContextDeviceStack()
 
 
 def current_device(create: bool = True) -> GridDevice:
@@ -1241,8 +1333,8 @@ def set_current_device(dev: GridDevice) -> None:
         _DEVICE_STACK[-1] = dev
 
 
-def grid_newpage(width_in: float = 8.0, height_in: float = 8.0, dpi: float = 100.0, fig: matplotlib.figure.Figure | None = None) -> GridDevice:
-    dev = GridDevice(width_in=width_in, height_in=height_in, dpi=dpi, fig=fig)
+def grid_newpage(width_in: float = 8.0, height_in: float = 8.0, dpi: float = 100.0, fig: Any = None, ax: Any = None) -> GridDevice:
+    dev = GridDevice(width_in=width_in, height_in=height_in, dpi=dpi, fig=fig, ax=ax)
     set_current_device(dev)
     return dev
 
@@ -1441,8 +1533,6 @@ def grid_xaxis(at: Sequence[float] | None = None, label: Sequence[str] | bool = 
     y_pos = 0.0 if main else 1.0
     tick_dy = unit(-1.5 if main else 1.5, "mm")
     lbl_dy = unit(-2.5 if main else 2.5, "mm")
-    grid_lines([scale[0], scale[1]], [y_pos, y_pos], gp=gp, default_units="native")
-    # Actually y is npc, x is native:
     grid_segments(unit(scale[0], "native"), unit(y_pos, "npc"), unit(scale[1], "native"), unit(y_pos, "npc"), gp=gp)
     if len(ticks) > 0:
         grid_segments(unit(ticks, "native"), unit(y_pos, "npc"), unit(ticks, "native"), unit(y_pos, "npc") + tick_dy, gp=gp)

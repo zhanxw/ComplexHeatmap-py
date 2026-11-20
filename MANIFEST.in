@@ -1,6 +1,8 @@
 include LICENSE
 include README.md
 include pyproject.toml
+include src/ComplexHeatmap.pyi
+include src/complexheatmap/py.typed
 recursive-include src/complexheatmap/data *.csv *.txt
 prune .venv
 prune .pytest_cache

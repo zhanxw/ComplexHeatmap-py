@@ -6,9 +6,10 @@ import copy
 from typing import Any, Callable, Sequence
 
 import numpy as np
-from scipy.cluster.hierarchy import linkage as scipy_linkage
+import pandas as pd
+from scipy.cluster.hierarchy import leaves_list, linkage as scipy_linkage
 from scipy.spatial.distance import pdist as scipy_pdist, squareform
-from scipy.stats import kendalltau, pearsonr, spearmanr
+from scipy.stats import rankdata
 
 from .colors import brewer_pal, to_hex_rgba
 from .grid import (
@@ -103,24 +104,21 @@ def dist(x: Any, method: str = "euclidean") -> DistMatrix:
 
     if m in ("pearson", "spearman", "kendall"):
         # R: (1 - cor(t(mat), method=method, use="pairwise.complete.obs")) / 2
-        cond = []
-        for i in range(n):
-            for j in range(i + 1, n):
-                xi, xj = arr[i], arr[j]
-                mask = np.isfinite(xi) & np.isfinite(xj)
-                if np.sum(mask) < 2:
-                    r = 0.0
-                else:
-                    a, b = xi[mask], xj[mask]
-                    if np.std(a) == 0 or np.std(b) == 0:
-                        r = 0.0
-                    elif m == "pearson":
-                        r, _ = pearsonr(a, b)
-                    elif m == "spearman":
-                        r, _ = spearmanr(a, b)
-                    else:
-                        r, _ = kendalltau(a, b)
-                cond.append(0.5 * (1.0 - float(r)))
+        if m in ("pearson", "spearman") and not np.isnan(arr).any():
+            work = rankdata(arr, axis=1) if m == "spearman" else arr
+            centered = work - np.mean(work, axis=1, keepdims=True)
+            norms = np.linalg.norm(centered, axis=1, keepdims=True)
+            unit_rows = np.divide(centered, norms, out=np.zeros_like(centered), where=norms > 1e-15)
+            corr = np.clip(unit_rows @ unit_rows.T, -1.0, 1.0)
+            # Zero-norm (constant) rows produce 0 correlation -> 0.5 distance matching R
+            iu = np.triu_indices(n, k=1)
+            cond = 0.5 * (1.0 - corr[iu])
+            return DistMatrix(np.asarray(cond, dtype=float), n=n, method=m)
+
+        corr_mat = pd.DataFrame(arr.T).corr(method=m, min_periods=2).to_numpy()
+        corr_mat = np.nan_to_num(np.clip(corr_mat, -1.0, 1.0), nan=0.0)
+        iu = np.triu_indices(n, k=1)
+        cond = 0.5 * (1.0 - corr_mat[iu])
         return DistMatrix(np.asarray(cond, dtype=float), n=n, method=m)
 
     raise ValueError(f"Unsupported distance method: {method!r}")
@@ -213,33 +211,43 @@ def _linkage_order(Z: np.ndarray, n: int) -> list[int]:
         return []
     if n == 1:
         return [0]
-    def _walk(node_id: int) -> list[int]:
-        if node_id < n:
-            return [int(node_id)]
-        row = Z[node_id - n]
-        return _walk(int(row[0])) + _walk(int(row[1]))
-    return _walk(2 * n - 2)
+    return leaves_list(Z).astype(int).tolist()
 
 
 def hclust(d: DistMatrix | np.ndarray, method: str = "complete") -> Hclust:
     """Perform hierarchical clustering equivalent to R `stats::hclust`."""
+    from ._options import ht_opt
+
     dm = as_dist(d)
     if dm.n <= 1:
         return Hclust(np.zeros((0, 4), dtype=float), n=dm.n, labels=dm.labels, method=method)
-    m_map = {
-        "ward.d": "ward",
-        "ward.d2": "ward",
-        "ward": "ward",
-        "mcquitty": "weighted",
-        "median": "median",
-        "centroid": "centroid",
-        "single": "single",
-        "complete": "complete",
-        "average": "average",
-    }
-    sp_m = m_map.get(method.lower(), method)
+
+    link_fn = scipy_linkage
+    if ht_opt.fast_hclust:
+        try:
+            import fastcluster
+            link_fn = fastcluster.linkage
+        except ImportError:
+            link_fn = scipy_linkage
+
+    ml = method.lower()
     cond = np.nan_to_num(dm.condensed, nan=0.0)
-    Z = scipy_linkage(cond, method=sp_m)
+    if ml in ("ward.d", "ward"):
+        # R `ward.D` applies the Ward recurrence to unsquared input distances
+        Z = link_fn(np.sqrt(np.maximum(0.0, cond)), method="ward").copy()
+        Z[:, 2] = Z[:, 2] ** 2
+    else:
+        m_map = {
+            "ward.d2": "ward",
+            "mcquitty": "weighted",
+            "median": "median",
+            "centroid": "centroid",
+            "single": "single",
+            "complete": "complete",
+            "average": "average",
+        }
+        sp_m = m_map.get(ml, method)
+        Z = link_fn(cond, method=sp_m)
     return Hclust(Z, n=dm.n, labels=dm.labels, method=method)
 
 

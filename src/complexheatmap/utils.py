@@ -10,7 +10,7 @@ import pandas as pd
 
 from .annotations import HeatmapAnnotation, c_HeatmapAnnotation
 from .colors import ColorMapping, c_ColorMapping
-from .units import Unit, is_unit, unit_c
+from .units import Unit, _resolve_vp, is_unit, unit_c
 
 
 _DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -36,8 +36,9 @@ def pindex(m: Any, i: Any, j: Any) -> np.ndarray:
 
 def restore_matrix(j: Any, i: Any, x: Any, y: Any) -> np.ndarray:
     """Reconstruct 2D slice position index matrix inside `layer_fun` (`restore_matrix.Rd`)."""
-    x_vals = x.to_mm("x") if isinstance(x, Unit) else np.asarray(x, dtype=float)
-    y_vals = y.to_mm("y") if isinstance(y, Unit) else np.asarray(y, dtype=float)
+    vp = _resolve_vp(None)
+    x_vals = x.to_mm("x", vp, pos_mode=True) if isinstance(x, Unit) else np.asarray(x, dtype=float)
+    y_vals = y.to_mm("y", vp, pos_mode=True) if isinstance(y, Unit) else np.asarray(y, dtype=float)
     # Round slightly to group identical coordinates cleanly
     xu = np.sort(np.unique(np.round(x_vals, 6)))
     yu = np.sort(np.unique(np.round(y_vals, 6)))[::-1]  # top-to-bottom descending y

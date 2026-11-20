@@ -18,6 +18,33 @@ OUT_DIR = Path(__file__).resolve().parent / "output"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def render_00_quick_example() -> None:
+    """Render the Quick Example snippet shown in README.md."""
+    ch.ht_opt(kmeans_seed=123)
+    rng = np.random.default_rng(123)
+    mat = pd.DataFrame(
+        rng.standard_normal((12, 10)),
+        index=[f"gene_{i}" for i in range(12)],
+        columns=[f"sample_{j}" for j in range(10)],
+    )
+
+    ha_top = ch.HeatmapAnnotation(
+        Group=["Ctrl"] * 5 + ["Treat"] * 5,
+        Score=ch.anno_barplot(rng.uniform(0, 1, 10)),
+        col={"Group": {"Ctrl": "#4DAF4A", "Treat": "#E41A1C"}},
+    )
+
+    ht1 = ch.Heatmap(mat, name="Expr", row_km=2, top_annotation=ha_top, border=True)
+    ht2 = ch.Heatmap(mat.iloc[:, :4] * 2, name="Delta")
+    res = ch.draw(ht1 + ht2, width=9.0, height=6.5, dpi=150)
+
+    with ch.decorate_heatmap_body("Expr", row_slice=1, column_slice=1):
+        ch.grid.rect(gp=ch.gpar(fill="transparent", col="gold", lwd=2))
+
+    res._device.fig.savefig(OUT_DIR / "00_quick_example.png", dpi=150, facecolor="white")
+    plt.close("all")
+
+
 def render_01_logo() -> None:
     """Port of ComplexHeatmap/logo.R."""
     lines = [
@@ -363,6 +390,7 @@ def render_08_density_and_3d() -> None:
 
 def main() -> None:
     for fn in (
+        render_00_quick_example,
         render_01_logo,
         render_02_single_heatmap_split,
         render_03_annotations_zoo,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 import itertools
 from typing import Any, Iterator
 
@@ -26,6 +27,7 @@ _DEFAULTS: dict[str, Any] = {
     "annotation_border": None,
     "fast_hclust": False,
     "show_parent_dend_line": True,
+    "kmeans_seed": None,
     "verbose": False,
     "message": True,
     "show_vp": False,
@@ -37,6 +39,8 @@ _DEFAULTS: dict[str, Any] = {
     "ROW_ANNO_PADDING": unit(1.0, "mm"),
     "HEATMAP_LEGEND_PADDING": unit(2.0, "mm"),
     "ANNOTATION_LEGEND_PADDING": unit(2.0, "mm"),
+    "PAGE_PADDING": None,
+    "ht_gap": None,
     "save_last": False,
     "validate_names": True,
     "raster_temp_image_max_width": 30000,
@@ -62,9 +66,11 @@ def _filter_option(key: str, val: Any) -> Any:
         if len(u) == 1:
             return unit([u.to_mm_scalar("y"), u.to_mm_scalar("y")], "mm")
         return u[:2]
+    if key == "kmeans_seed":
+        return int(val)
     if key.endswith("_gp"):
         return check_gp(val)
-    if key in ("simple_anno_size", "legend_grid_height", "legend_grid_width") or key.endswith("_PADDING"):
+    if key in ("simple_anno_size", "legend_grid_height", "legend_grid_width", "PAGE_PADDING", "ht_gap") or key.endswith("_PADDING"):
         return val if isinstance(val, Unit) else unit(val, "mm")
     if key in ("verbose", "message", "fast_hclust", "merge_legends", "show_parent_dend_line", "show_vp", "save_last", "validate_names"):
         return bool(val)
@@ -144,15 +150,58 @@ ht_opt = _OptionsManager()
 ht_global_opt = ht_opt
 
 
+_CTX_ENV_STATE: ContextVar[dict[str, Any] | None] = ContextVar("complexheatmap_runtime_env", default=None)
+
+
 class _RuntimeEnv:
     def __init__(self) -> None:
-        self.current_annotation_which: str | None = None
-        self.current_heatmap: Any = None
-        self.last: Any = None
         self.heatmap_counter = itertools.count(1)
         self.anno_counter = itertools.count(1)
         self.oncoprint_counter = itertools.count(1)
-        self.chr_window: Any = None
+
+    def _state(self) -> dict[str, Any]:
+        st = _CTX_ENV_STATE.get()
+        if st is None:
+            st = {
+                "current_annotation_which": None,
+                "current_heatmap": None,
+                "last": None,
+                "chr_window": None,
+            }
+            _CTX_ENV_STATE.set(st)
+        return st
+
+    @property
+    def current_annotation_which(self) -> str | None:
+        return self._state()["current_annotation_which"]
+
+    @current_annotation_which.setter
+    def current_annotation_which(self, val: str | None) -> None:
+        self._state()["current_annotation_which"] = val
+
+    @property
+    def current_heatmap(self) -> Any:
+        return self._state()["current_heatmap"]
+
+    @current_heatmap.setter
+    def current_heatmap(self, val: Any) -> None:
+        self._state()["current_heatmap"] = val
+
+    @property
+    def last(self) -> Any:
+        return self._state()["last"]
+
+    @last.setter
+    def last(self, val: Any) -> None:
+        self._state()["last"] = val
+
+    @property
+    def chr_window(self) -> Any:
+        return self._state()["chr_window"]
+
+    @chr_window.setter
+    def chr_window(self, val: Any) -> None:
+        self._state()["chr_window"] = val
 
     def next_heatmap_index(self) -> int:
         return next(self.heatmap_counter)

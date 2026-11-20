@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ComplexHeatmap-py"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python port of the ComplexHeatmap R/Bioconductor package for making complex heatmaps, annotations, oncoPrints, UpSet plots, and density heatmaps."
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
     {name = "Xiaowei Zhan", email = "zhanxw@gmail.com"},
@@ -59,7 +60,7 @@ py-modules = ["ComplexHeatmap"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-complexheatmap = ["data/*.csv", "data/*.txt", "data/**/*.csv"]
+complexheatmap = ["py.typed", "data/*.csv", "data/*.txt", "data/**/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

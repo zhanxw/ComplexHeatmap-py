@@ -133,47 +133,71 @@ class GRanges:
         return f"GRanges(n={len(self)}, mcols={list(self.mcols.columns)})"
 
 
+def _overlap_intervals(
+    q_starts: np.ndarray,
+    q_ends: np.ndarray,
+    s_starts: np.ndarray,
+    s_ends: np.ndarray,
+    q_orig: np.ndarray | None = None,
+    s_orig: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Find overlapping index pairs using start-sort + prefix-max-end sweep pruning."""
+    nq = len(q_starts)
+    ns = len(s_starts)
+    if nq == 0 or ns == 0:
+        return np.empty(0, dtype=int), np.empty(0, dtype=int)
+
+    order_s = np.argsort(s_starts, kind="mergesort")
+    ss = s_starts[order_s]
+    se = s_ends[order_s]
+    s_mapped = s_orig[order_s] if s_orig is not None else order_s
+    prefix_max_e = np.maximum.accumulate(se)
+
+    q_chunks: list[np.ndarray] = []
+    s_chunks: list[np.ndarray] = []
+    for qi in range(nq):
+        qs = int(q_starts[qi])
+        qe = int(q_ends[qi])
+        hi = int(np.searchsorted(ss, qe, side="right"))
+        if hi == 0 or prefix_max_e[hi - 1] < qs:
+            continue
+        lo = int(np.searchsorted(prefix_max_e[:hi], qs, side="left"))
+        rel = np.flatnonzero(se[lo:hi] >= qs) + lo
+        if len(rel) > 0:
+            q_val = int(q_orig[qi]) if q_orig is not None else qi
+            q_chunks.append(np.full(len(rel), q_val, dtype=int))
+            s_chunks.append(s_mapped[rel])
+
+    if not q_chunks:
+        return np.empty(0, dtype=int), np.empty(0, dtype=int)
+    return np.concatenate(q_chunks), np.concatenate(s_chunks)
+
+
 def findOverlaps(query: GRanges | IRanges, subject: GRanges | IRanges) -> tuple[np.ndarray, np.ndarray]:
     """Find overlapping interval index pairs `(queryHits, subjectHits)`."""
     if isinstance(query, IRanges) and isinstance(subject, IRanges):
-        q_idx: list[int] = []
-        s_idx: list[int] = []
-        order_s = np.argsort(subject.start)
-        s_start = subject.start[order_s]
-        s_end = subject.end[order_s]
-        for qi in range(len(query)):
-            qs, qe = int(query.start[qi]), int(query.end[qi])
-            hi = int(np.searchsorted(s_start, qe, side="right"))
-            for pos in range(hi):
-                if s_end[pos] >= qs:
-                    q_idx.append(qi)
-                    s_idx.append(int(order_s[pos]))
-        return np.asarray(q_idx, dtype=int), np.asarray(s_idx, dtype=int)
+        return _overlap_intervals(query.start, query.end, subject.start, subject.end)
 
     if isinstance(query, GRanges) and isinstance(subject, GRanges):
-        q_idx = []
-        s_idx = []
-        by_chr: dict[str, list[int]] = {}
-        for si, ch in enumerate(subject.seqnames):
-            by_chr.setdefault(ch, []).append(si)
+        by_chr_s = _group_by_chr(subject.seqnames)
+        q_all: list[np.ndarray] = []
+        s_all: list[np.ndarray] = []
         for ch, q_list in _group_by_chr(query.seqnames).items():
-            if ch not in by_chr:
+            if ch not in by_chr_s:
                 continue
-            s_list = np.asarray(by_chr[ch], dtype=int)
-            sub_s = subject.start[s_list]
-            sub_e = subject.end[s_list]
-            ord_s = np.argsort(sub_s)
-            sub_s = sub_s[ord_s]
-            sub_e = sub_e[ord_s]
-            s_orig = s_list[ord_s]
-            for qi in q_list:
-                qs, qe = int(query.start[qi]), int(query.end[qi])
-                hi = int(np.searchsorted(sub_s, qe, side="right"))
-                for pos in range(hi):
-                    if sub_e[pos] >= qs:
-                        q_idx.append(qi)
-                        s_idx.append(int(s_orig[pos]))
-        return np.asarray(q_idx, dtype=int), np.asarray(s_idx, dtype=int)
+            q_arr = np.asarray(q_list, dtype=int)
+            s_arr = np.asarray(by_chr_s[ch], dtype=int)
+            qh, sh = _overlap_intervals(
+                query.start[q_arr], query.end[q_arr],
+                subject.start[s_arr], subject.end[s_arr],
+                q_orig=q_arr, s_orig=s_arr,
+            )
+            if len(qh) > 0:
+                q_all.append(qh)
+                s_all.append(sh)
+        if not q_all:
+            return np.empty(0, dtype=int), np.empty(0, dtype=int)
+        return np.concatenate(q_all), np.concatenate(s_all)
 
     raise TypeError("`query` and `subject` must both be GRanges or both be IRanges.")
 

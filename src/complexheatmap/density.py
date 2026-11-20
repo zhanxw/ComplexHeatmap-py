@@ -10,11 +10,11 @@ import pandas as pd
 from scipy.stats import gaussian_kde, ks_2samp
 
 from ._options import _ENV
-from .annotations import HeatmapAnnotation, anno_lines, anno_points
+from .annotations import HeatmapAnnotation, anno_empty, anno_lines, anno_points, rowAnnotation
 from .colors import brewer_pal, colorRamp2
 from .decorate import decorate_heatmap_body
 from .dendrogram import DistMatrix, as_dist
-from .grid import grid_lines, grid_segments, grid_text, grid_yaxis
+from .grid import Viewport, grid_lines, grid_segments, grid_text, grid_yaxis, popViewport, pushViewport
 from .heatmap import Heatmap
 from .units import Unit, as_unit, check_gp, gpar, unit
 
@@ -174,7 +174,7 @@ def densityHeatmap(
                     grid_text(ylab, x=unit(-11, "mm"), y=unit(0.5, "npc"), rot=90, gp=gpar(fontsize=10))
                 finally:
                     popViewport()
-        except Exception:
+        except KeyError:
             pass
         if user_post is not None:
             user_post(ht_list)
@@ -185,6 +185,8 @@ def densityHeatmap(
         name=ht_name,
         column_title=title if title is not None else [],
         top_annotation=anno,
+        left_annotation=rowAnnotation(_yaxis_space=anno_empty(border=False, width=unit(12, "mm")), show_annotation_name=False),
+        right_annotation=rowAnnotation(_qlabel_space=anno_empty(border=False, width=unit(11, "mm")), show_annotation_name=False) if show_quantiles else None,
         cluster_rows=False,
         cluster_columns=bool(cluster_columns),
         clustering_distance_columns=eff_distance_arg,

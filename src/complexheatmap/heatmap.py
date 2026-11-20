@@ -1785,7 +1785,9 @@ class Heatmap(AdditiveUnit):
                 submat = self.matrix[np.ix_(r_idx, c_idx)]
                 rect_gp = self.matrix_param["rect_gp"]
                 rect_type = rect_gp.get("type", None)
-                if self.matrix_color_mapping is not None and self._oncoprint_env is None and (
+                use_raster = bool(self.heatmap_param["use_raster"])
+                need_col_mat = (not use_raster) or (self.matrix_param["layer_fun"] is not None) or (self.matrix_param["cell_fun"] is not None)
+                if need_col_mat and self.matrix_color_mapping is not None and self._oncoprint_env is None and (
                     rect_type != "none" or self.matrix_param["layer_fun"] is not None or self.matrix_param["cell_fun"] is not None
                 ):
                     col_mat = self.matrix_color_mapping.map_to_colors(submat)
@@ -1794,14 +1796,15 @@ class Heatmap(AdditiveUnit):
 
                 # Vectorized cell coordinates in npc (row 0 at top -> y = (nr_s - r - 0.5)/nr_s)
                 if rect_type != "none":
-                    if self.heatmap_param["use_raster"]:
-                        # Downsample if raster_resize_mat is set and matrix is numeric
+                    if use_raster:
                         resize_opt = self.heatmap_param["raster_resize_mat"]
-                        rgba_img = np.zeros((nr_s, nc_s, 4), dtype=float)
-                        if resize_opt and self._is_numeric and (nr_s > 400 or nc_s > 400):
-                            fn = np.nanmean if resize_opt is True else resize_opt
-                            tgt_r = min(nr_s, 400)
-                            tgt_c = min(nc_s, 400)
+                        max_w = int(ht_opt.raster_temp_image_max_width or 30000)
+                        max_h = int(ht_opt.raster_temp_image_max_height or 30000)
+                        need_downsample = (resize_opt and self._is_numeric and (nr_s > 400 or nc_s > 400)) or nr_s > max_h or nc_s > max_w
+                        if need_downsample and self._is_numeric:
+                            fn = np.nanmean if (resize_opt is True or not callable(resize_opt)) else resize_opt
+                            tgt_r = min(nr_s, 400 if resize_opt else max_h)
+                            tgt_c = min(nc_s, 400 if resize_opt else max_w)
                             r_bins = np.array_split(np.arange(nr_s), tgt_r)
                             c_bins = np.array_split(np.arange(nc_s), tgt_c)
                             sub_small = np.empty((tgt_r, tgt_c), dtype=float)
@@ -1809,15 +1812,15 @@ class Heatmap(AdditiveUnit):
                                 for ci, cb in enumerate(c_bins):
                                     with np.errstate(all="ignore"):
                                         sub_small[ri, ci] = fn(submat[np.ix_(rb, cb)])
-                            col_small = self.matrix_color_mapping.map_to_colors(sub_small)
-                            rgba_img = np.zeros((tgt_r, tgt_c, 4), dtype=float)
-                            for ri in range(tgt_r):
-                                for ci in range(tgt_c):
-                                    rgba_img[ri, ci] = to_rgba_tuple(col_small[ri, ci])
+                            if self.matrix_color_mapping is not None:
+                                rgba_img = self.matrix_color_mapping.map_to_rgba(sub_small)
+                            else:
+                                rgba_img = np.ones((tgt_r, tgt_c, 4), dtype=float)
                         else:
-                            for ri in range(nr_s):
-                                for ci in range(nc_s):
-                                    rgba_img[ri, ci] = to_rgba_tuple(col_mat[ri, ci])
+                            if self.matrix_color_mapping is not None:
+                                rgba_img = self.matrix_color_mapping.map_to_rgba(submat)
+                            else:
+                                rgba_img = np.ones((nr_s, nc_s, 4), dtype=float)
                         grid_raster(rgba_img, x=0.5, y=0.5, width=1.0, height=1.0, interpolate=False)
                     else:
                         # Column-major flattening to align with layer_fun & restore_matrix
@@ -2120,6 +2123,10 @@ class Heatmap(AdditiveUnit):
 
     def show(self) -> Any:
         return self.draw()
+
+    def to_svg(self, **kwargs: Any) -> str:
+        from .heatmap_list import HeatmapList
+        return HeatmapList([self], direction="horizontal").to_svg(**kwargs)
 
     def summary(self) -> str:
         lines = [

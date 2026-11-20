@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import copy
+import io
 import math
 from typing import Any, Callable, Sequence
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -447,7 +449,7 @@ class HeatmapList(AdditiveUnit):
         column_title_gp: dict[str, Any] | None = None,
 
         heatmap_legend_side: str = "right",
-        merge_legends: bool = False,
+        merge_legends: bool | None = None,
         show_heatmap_legend: bool = True,
         heatmap_legend_list: Sequence[Legends | Grob] = (),
         annotation_legend_side: str = "right",
@@ -513,6 +515,17 @@ class HeatmapList(AdditiveUnit):
             return work
 
         gap_arg = ht_opt.ht_gap if ht_gap is None and hasattr(ht_opt, "ht_gap") and ht_opt.ht_gap is not None else ht_gap
+        eff_merge_legends = bool(ht_opt.merge_legends) if merge_legends is None else bool(merge_legends)
+        if ht_opt.validate_names:
+            seen_hn: set[str] = set()
+            dup_hn: list[str] = []
+            for it in work.ht_list:
+                if isinstance(it, Heatmap) and not it.name.startswith("_scaffold_"):
+                    if it.name in seen_hn and it.name not in dup_hn:
+                        dup_hn.append(it.name)
+                    seen_hn.add(it.name)
+            if dup_hn:
+                warnings.warn(f"Heatmap names should be unique; duplicate name(s): {dup_hn}", UserWarning, stacklevel=3)
         eff_auto_adjust = bool(auto_adjust)
         legend_grouping = _normalize_side(legend_grouping, ("adjusted", "original"), "legend_grouping")
         hm_leg_side = _normalize_side(heatmap_legend_side, ("right", "left", "bottom", "top"), "heatmap_legend_side")
@@ -788,7 +801,7 @@ class HeatmapList(AdditiveUnit):
             work.ht_list_param["main_heatmap"] = None
             work.ht_list_param["ht_gap"] = _normalize_ht_gap(gap_arg, len(work.ht_list))
 
-        work.ht_list_param["merge_legends"] = bool(merge_legends)
+        work.ht_list_param["merge_legends"] = eff_merge_legends
         work.ht_list_param["legend_grouping"] = legend_grouping
         work.ht_list_param["auto_adjust"] = eff_auto_adjust
         work.ht_list_param["padding"] = padding
@@ -820,10 +833,10 @@ class HeatmapList(AdditiveUnit):
             extra_hm = [heatmap_legend_list] if isinstance(heatmap_legend_list, (Legends, Grob)) else list(heatmap_legend_list)
             hm_leg_list_items.extend(extra_hm)
 
-        an_leg_list_items = [] if merge_legends or not show_annotation_legend else work._collect_legends("annotation")
+        an_leg_list_items = [] if eff_merge_legends or not show_annotation_legend else work._collect_legends("annotation")
         if annotation_legend_list:
             extra_an = [annotation_legend_list] if isinstance(annotation_legend_list, (Legends, Grob)) else list(annotation_legend_list)
-            if merge_legends and show_heatmap_legend:
+            if eff_merge_legends and show_heatmap_legend:
                 hm_leg_list_items.extend(extra_an)
             elif show_annotation_legend:
                 an_leg_list_items.extend(extra_an)
@@ -1145,6 +1158,7 @@ class HeatmapList(AdditiveUnit):
         width: float | None = None,
         height: float | None = None,
         fig: Any = None,
+        ax: Any = None,
         dpi: float = 100.0,
         save: str | None = None,
         show: bool = False,
@@ -1152,7 +1166,9 @@ class HeatmapList(AdditiveUnit):
         **layout_kwargs: Any,
     ) -> "HeatmapList":
         # Default figure dimensions in inches (~ 8x7 in unless user provides size or existing device)
-        if fig is not None:
+        if ax is not None:
+            dev = grid_newpage(dpi=dpi, ax=ax)
+        elif fig is not None:
             dev = grid_newpage(dpi=dpi, fig=fig) if newpage else current_device()
         elif newpage:
             w_in = float(width) if width is not None else 8.0
@@ -1382,15 +1398,31 @@ class HeatmapList(AdditiveUnit):
             popViewport()
 
         _ENV.last = prepared
+        if ht_opt.save_last:
+            prepared._unprepared_source = self.copy_all()
         if save is not None:
             dev.fig.savefig(save, dpi=dpi, facecolor=dev.fig.get_facecolor())
         if show:
             import matplotlib.pyplot as plt
-            plt.show()
+            if getattr(dev.fig.canvas, "manager", None) is not None:
+                plt.show()
+            else:
+                try:
+                    dev.fig.show()
+                except Exception:
+                    pass
         return prepared
 
     def show(self) -> "HeatmapList":
         return self.draw()
+
+    def to_svg(self, **draw_kwargs: Any) -> str:
+        """Render this HeatmapList to an SVG string."""
+        draw_kwargs.setdefault("show", False)
+        res = self.draw(**draw_kwargs)
+        buf = io.StringIO()
+        res._device.fig.savefig(buf, format="svg", facecolor=res._device.fig.get_facecolor())
+        return buf.getvalue()
 
     def summary(self) -> str:
         lines = [f"A HeatmapList ({self.direction}) with {len(self.ht_list)} component(s):"]

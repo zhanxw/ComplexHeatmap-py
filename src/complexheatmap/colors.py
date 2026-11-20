@@ -327,12 +327,11 @@ def colorRamp2(
 
     alphas = rgba_sorted[:, 3]
 
-    def col_fun(x: Any) -> Any:
-        is_scalar = np.ndim(x) == 0 and not isinstance(x, (list, tuple, np.ndarray))
+    def to_rgba_array(x: Any, na_rgba: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)) -> np.ndarray:
         arr = np.asarray(x, dtype=float)
         orig_shape = arr.shape
         flat = arr.ravel()
-        out = np.empty(len(flat), dtype=object)
+        out = np.empty((len(flat), 4), dtype=float)
 
         nan_mask = np.isnan(flat)
         valid_idx = np.where(~nan_mask)[0]
@@ -343,13 +342,28 @@ def colorRamp2(
             ])
             interp_alpha = np.interp(v, brk_sorted, alphas)
             rgb = back(interp_coords)
-            r_b = np.clip(np.round(rgb[:, 0] * 255), 0, 255).astype(int)
-            g_b = np.clip(np.round(rgb[:, 1] * 255), 0, 255).astype(int)
-            b_b = np.clip(np.round(rgb[:, 2] * 255), 0, 255).astype(int)
-            a_b = np.clip(np.round(interp_alpha * 255), 0, 255).astype(int)
-            for k, idx in enumerate(valid_idx):
-                out[idx] = f"#{r_b[k]:02X}{g_b[k]:02X}{b_b[k]:02X}{a_b[k]:02X}"
+            out[valid_idx, :3] = np.clip(rgb, 0.0, 1.0)
+            out[valid_idx, 3] = np.clip(interp_alpha, 0.0, 1.0)
 
+        if np.any(nan_mask):
+            out[nan_mask] = np.asarray(na_rgba, dtype=float)
+
+        return out.reshape(*orig_shape, 4)
+
+    def col_fun(x: Any) -> Any:
+        is_scalar = np.ndim(x) == 0 and not isinstance(x, (list, tuple, np.ndarray))
+        arr = np.asarray(x, dtype=float)
+        orig_shape = arr.shape
+        rgba_flat = to_rgba_array(arr.ravel())
+        out = np.empty(len(rgba_flat), dtype=object)
+
+        nan_mask = np.isnan(arr.ravel())
+        if np.any(~nan_mask):
+            rgba_bytes = np.clip(np.round(rgba_flat[~nan_mask] * 255), 0, 255).astype(int)
+            out[~nan_mask] = [
+                f"#{r:02X}{g:02X}{b:02X}{a:02X}"
+                for r, g, b, a in rgba_bytes
+            ]
         if np.any(nan_mask):
             out[nan_mask] = "#00000000"
 
@@ -360,6 +374,7 @@ def colorRamp2(
     col_fun.breaks = brk
     col_fun.colors = [to_hex_rgba(c) for c in colors]
     col_fun.space = space
+    col_fun.to_rgba_array = to_rgba_array
     return col_fun
 
 
@@ -676,6 +691,26 @@ class ColorMapping:
         if is_scalar:
             return out[0]
         return out.reshape(orig_shape)
+
+    def map_to_rgba(self, x: Any) -> np.ndarray:
+        """Vectorized float RGBA array conversion in [0, 1] of shape `(*x.shape, 4)`."""
+        arr = np.asarray(x)
+        if self.type == "continuous" and self.col_fun is not None and hasattr(self.col_fun, "to_rgba_array"):
+            if np.issubdtype(arr.dtype, np.number):
+                num_arr = arr.astype(float)
+            else:
+                flat = arr.ravel()
+                num_flat = np.empty(len(flat), dtype=float)
+                for idx, val in enumerate(flat):
+                    num_flat[idx] = np.nan if _is_missing_color(val) else float(val)
+                num_arr = num_flat.reshape(arr.shape)
+            return self.col_fun.to_rgba_array(num_arr, na_rgba=to_rgba_tuple(self.na_col))
+
+        hex_arr = np.asarray(self.map_to_colors(x), dtype=object)
+        orig_shape = hex_arr.shape
+        uniq, inv = np.unique(hex_arr.ravel(), return_inverse=True)
+        lut = np.array([to_rgba_tuple(hx) for hx in uniq], dtype=float)
+        return lut[inv].reshape(*orig_shape, 4)
 
     def color_mapping_legend(
         self,

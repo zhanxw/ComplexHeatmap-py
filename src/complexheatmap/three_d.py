@@ -152,6 +152,12 @@ def Heatmap3D(
         cos_t = math.cos(math.radians(float(bar_angle)))
         col_order = range(nc_s - 1, -1, -1) if cos_t >= 0 else range(nc_s)
 
+        xs_l: list[float] = []
+        ys_l: list[float] = []
+        ws_l: list[float] = []
+        hs_l: list[float] = []
+        ls_l: list[float] = []
+        fills_l: list[Any] = []
         for ri in range(nr_s):
             for ci in col_order:
                 pos = int(ind_mat[ri, ci])
@@ -162,18 +168,25 @@ def Heatmap3D(
                 val = float(arr[orig_i, orig_j])
                 if np.isnan(val):
                     continue
-                l_mm = (val / vmax) * max_len_mm
-                bar3D(
-                    x=unit(float(x_mm[pos]), "mm"),
-                    y=unit(float(y_mm[pos]), "mm"),
-                    w=unit(float(w_mm[pos]) * float(bar_rel_width), "mm"),
-                    h=unit(float(h_mm[pos]) * float(bar_rel_height), "mm"),
-                    l=unit(l_mm, "mm"),
-                    theta=bar_angle,
-                    fill=fill[pos],
-                    col=user_cell_col,
-                    draw=True,
-                )
+                xs_l.append(float(x_mm[pos]))
+                ys_l.append(float(y_mm[pos]))
+                ws_l.append(float(w_mm[pos]) * float(bar_rel_width))
+                hs_l.append(float(h_mm[pos]) * float(bar_rel_height))
+                ls_l.append((val / vmax) * max_len_mm)
+                fills_l.append(fill[pos])
+
+        if xs_l:
+            bar3D(
+                x=unit(xs_l, "mm"),
+                y=unit(ys_l, "mm"),
+                w=unit(ws_l, "mm"),
+                h=unit(hs_l, "mm"),
+                l=unit(ls_l, "mm"),
+                theta=bar_angle,
+                fill=fills_l,
+                col=user_cell_col,
+                draw=True,
+            )
 
     return Heatmap(
         matrix,
