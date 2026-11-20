@@ -6,6 +6,10 @@
 
 Complete standalone Python port of the R/Bioconductor **ComplexHeatmap** (v2.25.3) package, powered by NumPy, SciPy, Pandas, Pillow, and Matplotlib.
 
+## Documentation
+
+Full documentation and chapter-by-chapter tutorial book: **[ComplexHeatmap-py Complete Reference Book](https://zhanxw.github.io/ComplexHeatmap-reference-py/book/)**
+
 ## Installation
 
 ```bash
@@ -167,7 +171,7 @@ ch.Heatmap3D(mat_3d, name="Intensity", column_title="3D Isometric Heatmap (Heatm
 - **Annotations (`annotations.py`, `anno_funcs.py`)**: All 21 `anno_*` (`anno_simple`, `anno_empty`, `anno_points`, `anno_lines`, `anno_barplot`, `anno_boxplot`, `anno_histogram`, `anno_density`, `anno_joyplot`, `anno_horizon`, `anno_text`, `anno_numeric`, `anno_mark`, `anno_zoom`, `anno_link`, `anno_block`, `anno_summary`, `anno_image`, `anno_customize`, `anno_textbox`, `anno_oncoprint_barplot`) + 6 `row_anno_*` aliases, `HeatmapAnnotation`, `rowAnnotation`, `columnAnnotation`, `SingleAnnotation`, `AnnotationFunction`, `attach_annotation`.
 - **Multi-Heatmap Lists & Legends (`heatmap.py`, `heatmap_list.py`, `legend.py`, `decorate.py`)**: Horizontal (`+`) and vertical (`%v%` / `/`) concatenation, `auto_adjust`, `main_heatmap` alignment, `Legend`/`packLegend` discrete + continuous + unequal-break legends, legend deduplication/`c_ColorMapping`, all 11 `decorate_*` viewport decorators, and slice/subsetting indexing (`ht[i, j]`, `ht_list[i, j]`).
 - **High-Level Genomics & Plots (`oncoprint.py`, `upset.py`, `density.py`, `three_d.py`, `genomic.py`, `translate.py`)**: `oncoPrint` (with memoSort & alteration polygons), `make_comb_mat` / `UpSet` (`distinct`, `intersect`, `union`, genomic intervals, `t(m)`), `densityHeatmap`, `frequencyHeatmap`, `ks_dist`, `bar3D`, `Heatmap3D`, `IRanges`/`GRanges`/`bin_genome`/`normalize_genomic_signals_to_bins`, and drop-in translations `pheatmap`, `heatmap`, `heatmap_2`, `compare_*`.
-- **Examples & Verification**: Complete ports of all **102 executable `.Rd` examples** ([examples/run_all_rd_examples.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/run_all_rd_examples.py)), publication gallery ([examples/showcase_gallery.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/showcase_gallery.py)), R-to-Python guide ([examples/r_to_python_guide.md](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/r_to_python_guide.md)), and `pytest` suite (`134 passed`).
+- **Examples & Verification**: Complete documentation in the **[ComplexHeatmap-py Complete Reference Book](https://zhanxw.github.io/ComplexHeatmap-reference-py/book/)**, ports of all **102 executable `.Rd` examples** ([examples/run_all_rd_examples.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/run_all_rd_examples.py)), publication gallery ([examples/showcase_gallery.py](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/showcase_gallery.py)), R-to-Python guide ([examples/r_to_python_guide.md](https://github.com/zhanxw/ComplexHeatmap-py/blob/main/examples/r_to_python_guide.md)), and `pytest` suite (`135 passed`).
 
 ## License & Attribution
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 __upstream_r_version__ = "2.25.3"
 
 # Core options, base infix operators, units & graphics
